@@ -556,6 +556,7 @@ async def run_batch(client, acc, message, start_link, count):
     user_id = message.from_user.id
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
+    batch_start_time = time.time()
     
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
@@ -580,7 +581,7 @@ async def run_batch(client, acc, message, start_link, count):
             current_msg_id = base_id + i
             try:
                 # 3. Process the file
-                await handle_private(client, acc, message, chat_id, current_msg_id)
+                await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time)
                 
                 # Update the progress message in DM
                 await stats_msg.edit_text(f"📊 **Batch Progress:** {i+1}/{count} files processed.")
@@ -653,7 +654,7 @@ async def progress(current, total, message, type, user_id, db, start_time):
 
 
 # handle private
-async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int):
+async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None):
     msg: Message = await acc.get_messages(chatid, msgid)
     if msg.empty: return 
     msg_type = get_message_type(msg)
@@ -692,7 +693,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
 
     try:
-        start_time = time.time()
+        start_time = batch_time if batch_time else time.time()
         file = await acc.download_media(
             msg, 
             progress=progress, 
@@ -724,7 +725,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     # --- Unified Upload Logic with Kill Switch ---
     try:
-        start_time = time.time()
+        start_time = batch_time if batch_time else time.time()
         if "Document" == msg_type:
             try:
                 ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
