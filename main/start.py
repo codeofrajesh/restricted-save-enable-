@@ -209,11 +209,25 @@ async def send_cancel(client, message):
         batch_temp.IS_BATCH[user_id] = True
         
         # 4. Send confirmation
-        await message.reply(
-            "**✅ Batch Cancellation Requested!**\n\n"
-            "Stopping ongoing batch processing...\n"
-            "Please wait 5 seconds before starting again."
-        )
+        if status == "processing_batch":
+            # Batch message
+            await message.reply(
+                "**🛑 Batch Cancellation Requested!**\n\n"
+                "Stopping ongoing batch processing...\n"
+                "Please wait 5 seconds before starting again."
+            )
+        elif status == "processing_single":
+            # Single file message ✅ NEW
+            await message.reply(
+                "**🛑 File Transfer Cancelled!**\n\n"
+                "Please wait 5 seconds before starting again."
+            )
+        else:
+            # Generic message
+            await message.reply(
+                "**✅ Operation Cancelled!**\n\n"
+                "Please wait 5 seconds before starting again."
+            )
         
     except Exception as e:
         await message.reply(f"**⚠️ Cancellation Error:** {str(e)}")
