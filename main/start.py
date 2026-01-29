@@ -451,9 +451,8 @@ async def save(client: Client, message: Message):
     # 1. THE GATEKEEPER: Check if user is busy with a menu or setup
     status = await db.get_status(user_id)
     if status is not None and status != "processing_batch":
-        # If user is in 'awaiting_end_link', we exit here
-        # This prevents the 'save' function from downloading the mismatch link
-        return    	
+        return      
+    
     # Joining chat
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
         if RazzeshUser is None:
@@ -503,53 +502,59 @@ async def save(client: Client, message: Message):
         datas = message.text.split("/")
         msgid = int(datas[-1].replace("?single","").split("-")[0])
 
-        # --- Logic for Different Link Types ---
-        
-        # 1. Private Channel Link
-        if "https://t.me/c/" in message.text:
-            chatid = int("-100" + datas[4])
-            try:
-                await handle_private(client, acc, message, chatid, msgid)
-            except Exception as e:
-                if ERROR_MESSAGE == True:
-                    await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
-    
-        # 2. Bot/Private Chat Link
-        elif "https://t.me/b/" in message.text:
-            username = datas[4]
-            try:
-                await handle_private(client, acc, message, username, msgid)
-            except Exception as e:
-                if ERROR_MESSAGE == True:
-                    await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
+        await db.set_status(message.from_user.id, "processing_single")
+
+        try:
+            # --- Logic for Different Link Types ---
             
-        # 3. Public Channel Link
-        else:
-            username = datas[3]
-            try:
-                # Try copying directly first for public links
-                msg = await client.get_messages(username, msgid)
-                await client.copy_message(message.chat.id, msg.chat.id, msg.id, reply_to_message_id=message.id)
-            except Exception:
-                # If copy fails, fall back to handle_private session
-                try:                
-                    await handle_private(client, acc, message, username, msgid)               
+            # 1. Private Channel Link
+            if "https://t.me/c/" in message.text:
+                chatid = int("-100" + datas[4])
+                try:
+                    await handle_private(client, acc, message, chatid, msgid)
                 except Exception as e:
                     if ERROR_MESSAGE == True:
                         await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
-
-        # Wait time between tasks
-        await asyncio.sleep(WAITING_TIME)
-
-        # Disconnect session if LOGIN_SYSTEM is active
-        if LOGIN_SYSTEM == True:
-            try:
-                await acc.disconnect()
-            except:
-                pass                        
         
-        # Unlock batch status for next task
-        batch_temp.IS_BATCH[message.from_user.id] = True
+            # 2. Bot/Private Chat Link
+            elif "https://t.me/b/" in message.text:
+                username = datas[4]
+                try:
+                    await handle_private(client, acc, message, username, msgid)
+                except Exception as e:
+                    if ERROR_MESSAGE == True:
+                        await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
+                
+            # 3. Public Channel Link
+            else:
+                username = datas[3]
+                try:
+                    # Try copying directly first for public links
+                    msg = await client.get_messages(username, msgid)
+                    await client.copy_message(message.chat.id, msg.chat.id, msg.id, reply_to_message_id=message.id)
+                except Exception:
+                    # If copy fails, fall back to handle_private session
+                    try:                
+                        await handle_private(client, acc, message, username, msgid)               
+                    except Exception as e:
+                        if ERROR_MESSAGE == True:
+                            await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
+
+        finally:
+            await db.set_status(message.from_user.id, None)
+
+            # Wait time between tasks
+            await asyncio.sleep(WAITING_TIME)
+
+            # Disconnect session if LOGIN_SYSTEM is active
+            if LOGIN_SYSTEM == True:
+                try:
+                    await acc.disconnect()
+                except:
+                    pass                        
+            
+            # Unlock batch status for next task
+            batch_temp.IS_BATCH[message.from_user.id] = True
 		
 # run batch helper function
 async def run_batch(client, acc, message, start_link, count):
@@ -623,7 +628,7 @@ def get_readable_time(seconds: int) -> str:
 #cancel check and progress function
 async def progress(current, total, message, type, user_id, db, start_time):
     status = await db.get_status(user_id)
-    if status is not None and status != "processing_batch":
+    if status is not None and status not in ["processing_batch", "processing_single"]:
         raise Exception("STOP_TRANSMISSION")
     
     now = time.time()
