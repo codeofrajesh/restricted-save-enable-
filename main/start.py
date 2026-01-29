@@ -607,31 +607,44 @@ async def run_batch(client, acc, message, start_link, count):
             except:
                 pass
 
-#cancel check 
+#clock function
+def get_readable_time(seconds: int) -> str:
+    count = 0
+    up_time = ""
+    # Define time increments: 60s, 60m, 24h
+    periods = [('h', 3600), ('m', 60), ('s', 1)]
+    for period_name, period_seconds in periods:
+        if seconds >= period_seconds:
+            period_value, seconds = divmod(seconds, period_seconds)
+            up_time += f"{period_value}{period_name} "
+    return up_time.strip() if up_time else "0s"
+
+
+#cancel check and progress function
 async def progress(current, total, message, type, user_id, db, start_time):
-    """Advanced Progress Bar with Speed, ETA, and Elapsed Time"""
-    # 1. Kill Switch check
     status = await db.get_status(user_id)
     if status is not None and status != "processing_batch":
         raise Exception("STOP_TRANSMISSION")
     
     now = time.time()
     diff = now - start_time
-    # Define a default in case the 10s timer hasn't triggered yet
     tmp = "📊 **Calculating Speed and ETA...**"
 
+    # Update every 10 seconds to stay within Telegram limits
     if round(diff % 10.00) == 0 or current == total:
         percentage = current * 100 / total
-        speed = current / diff if diff > 0 else 0
-        if diff > 0:
-            speed_mb = current / (1024 * 1024 * diff)
-        else:
-            speed_mb = 0    
-        elapsed_time = round(diff)
-        eta = round((total - current) / speed) if speed > 0 else 0
         
-        elapsed = time.strftime("%-Ss", time.gmtime(elapsed_time))
-        estimated = time.strftime("%-Ss", time.gmtime(eta))
+        # 1. Speed Calculation
+        speed_bytes = current / diff if diff > 0 else 0
+        speed_mb = speed_bytes / (1024 * 1024)
+        
+        # 2. Correct ETA Logic (Remaining Data / Speed)
+        remaining_bytes = total - current
+        eta_seconds = round(remaining_bytes / speed_bytes) if speed_bytes > 0 else 0
+        
+        # 3. Use our new Human-Readable time formatter
+        elapsed = get_readable_time(round(diff))
+        estimated = get_readable_time(eta_seconds)
         
         progress_bar = "".join(["🟧" for i in range(math.floor(percentage / 10))])
         remaining_bar = "".join(["⬜️" for i in range(10 - math.floor(percentage / 10))])
@@ -645,7 +658,6 @@ async def progress(current, total, message, type, user_id, db, start_time):
             f"⌛️ **Elapsed •** {elapsed}"
         )
         
-        # Wrapped in try-except to prevent the 'NoneType' write crash
         try:
             with open(f'{message.id}{type}status.txt', "w") as fileup:
                 fileup.write(tmp)
