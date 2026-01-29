@@ -1,5 +1,5 @@
-
-
+import time 
+import math
 import os
 import asyncio 
 import pyrogram
@@ -14,19 +14,18 @@ from bot import RazzeshUser
 class batch_temp(object):
     IS_BATCH = {}
 
+# download status
 async def downstatus(client, statusfile, message, chat):
     while True:
-        if os.path.exists(statusfile):
-            break
-
+        if os.path.exists(statusfile): break
         await asyncio.sleep(3)
-      
     while os.path.exists(statusfile):
-        with open(statusfile, "r") as downread:
-            txt = downread.read()
+        with open(statusfile, "r") as f:
+            txt = f.read()
         try:
-            await client.edit_message_text(chat, message.id, f"**Downloaded:** **{txt}**")
-            await asyncio.sleep(10)
+            # Added a header for the Download phase
+            await client.edit_message_text(chat, message.id, f"📥 **Downloading Content...**\n\n{txt}")
+            await asyncio.sleep(10) # Throttle to avoid FloodWait
         except:
             await asyncio.sleep(5)
 
@@ -34,15 +33,14 @@ async def downstatus(client, statusfile, message, chat):
 # upload status
 async def upstatus(client, statusfile, message, chat):
     while True:
-        if os.path.exists(statusfile):
-            break
-
+        if os.path.exists(statusfile): break
         await asyncio.sleep(3)      
     while os.path.exists(statusfile):
-        with open(statusfile, "r") as upread:
-            txt = upread.read()
+        with open(statusfile, "r") as f:
+            txt = f.read()
         try:
-            await client.edit_message_text(chat, message.id, f"**Uploaded:** **{txt}**")
+            # Added a header for the Upload phase
+            await client.edit_message_text(chat, message.id, f"📤 **Uploading Content...**\n\n{txt}")
             await asyncio.sleep(10)
         except:
             await asyncio.sleep(5)
@@ -193,10 +191,38 @@ async def batch_cmd(client, message):
 # cancel command
 @Client.on_message(filters.command(["cancel"]))
 async def send_cancel(client, message):
-    # Clear the processing status immediately
-    await db.set_status(message.from_user.id, "cancelled") 
-    batch_temp.IS_BATCH[message.from_user.id] = True 
-    await message.reply("**Batch Cancellation Requested. Please wait 5 seconds before starting again.**")
+    user_id = message.from_user.id
+    
+    try:
+        # 1. Check if user actually has a batch running
+        status = await db.get_status(user_id)
+        
+        if status is None or status == "cancelled":
+            await message.reply("**⚠️ No active batch to cancel.**")
+            message.stop_propagation()
+            return
+        
+        # 2. Set status to signal cancellation
+        await db.set_status(user_id, "cancelled")
+        
+        # 3. Set batch flag to prevent new tasks
+        batch_temp.IS_BATCH[user_id] = True
+        
+        # 4. Send confirmation
+        await message.reply(
+            "**✅ Batch Cancellation Requested!**\n\n"
+            "Stopping ongoing batch processing...\n"
+            "Please wait 5 seconds before starting again."
+        )
+        
+    except Exception as e:
+        await message.reply(f"**⚠️ Cancellation Error:** {str(e)}")
+    
+    # ✅ CRITICAL: Stop propagation BEFORE return
+    message.stop_propagation()
+    
+    # ✅ CRITICAL: Return to exit
+    return	
 	
 # The Catcher function
 @Client.on_message(filters.text & filters.private, group=-1)
@@ -365,8 +391,7 @@ async def handle_user_states(client, message):
         message.stop_propagation()
         return
 
-    elif status == "awaiting_end_link":
-        message.stop_propagation()		
+    elif status == "awaiting_end_link":		
         if batch_temp.IS_BATCH.get(user_id) == False:
             return await message.reply("⚠️ **Please wait!** The previous batch is still shutting down. Try again in 5 seconds.")
             
@@ -377,7 +402,9 @@ async def handle_user_states(client, message):
         # Validation: Same channel check
         if "t.me/" not in end_link or start_link.split('/')[-2] != end_link.split('/')[-2]:
             await db.set_status(user_id, None)
-            return await message.reply("❌ **Error:** Links must be from the same channel.")
+            await message.reply("❌ **Error:** Links must be from the same channel.")
+            message.stop_propagation()
+            return
            
         try:
             start_id = int(start_link.split('/')[-1])
@@ -385,7 +412,9 @@ async def handle_user_states(client, message):
             
             if end_id < start_id:
                 await db.set_status(user_id, None)
-                return await message.reply("❌ **Error:** End link cannot be older than the start link.")
+                await message.reply("❌ **Error:** End link cannot be older than the start link.")
+                message.stop_propagation() 
+                return
 
             count = (end_id - start_id) + 1
             if count > 100:
@@ -404,17 +433,27 @@ async def handle_user_states(client, message):
 
             await db.set_status(user_id, "processing_batch")
             await run_batch(client, acc, message, start_link, count=count)
+            message.stop_propagation()			
             
         except Exception as e:
             await db.set_status(user_id, None)
             await message.reply(f"❌ **Error:** {str(e)}")
+            message.stop_propagation()			
             
         message.stop_propagation()
         return
 
 #save function 
-@Client.on_message(filters.text & filters.private)
+@Client.on_message(filters.text & filters.private, group=1)
 async def save(client: Client, message: Message):
+    user_id = message.from_user.id
+    
+    # 1. THE GATEKEEPER: Check if user is busy with a menu or setup
+    status = await db.get_status(user_id)
+    if status is not None and status != "processing_batch":
+        # If user is in 'awaiting_end_link', we exit here
+        # This prevents the 'save' function from downloading the mismatch link
+        return    	
     # Joining chat
     if ("https://t.me/+" in message.text or "https://t.me/joinchat/" in message.text) and LOGIN_SYSTEM == False:
         if RazzeshUser is None:
@@ -568,17 +607,41 @@ async def run_batch(client, acc, message, start_link, count):
                 pass
 
 #cancel check 
-async def progress(current, total, message, type, user_id, db):
-    """Unified callback for Progress Bar + Kill Switch"""
-    # 1. THE KILL SWITCH: Check for /cancel signal mid-transfer
+async def progress(current, total, message, type, user_id, db, start_time):
+    """Advanced Progress Bar with Speed, ETA, and Elapsed Time"""
+    # 1. Kill Switch check
     status = await db.get_status(user_id)
     if status is not None and status != "processing_batch":
-        # Forcefully kills the transfer immediately
         raise Exception("STOP_TRANSMISSION")
 
+    now = time.time()
+    diff = now - start_time
+    if round(diff % 10.00) == 0 or current == total:
+        percentage = current * 100 / total
+        speed = current / diff
+        elapsed_time = round(diff)
+        eta = round((total - current) / speed) if speed > 0 else 0
+        
+        # Formatting units
+        elapsed = time.strftime("%-Ss", time.gmtime(elapsed_time))
+        estimated = time.strftime("%-Ss", time.gmtime(eta))
+        
+        # Progress Bar Logic (10 blocks)
+        progress_bar = "".join(["🟧" for i in range(math.floor(percentage / 10))])
+        remaining_bar = "".join(["⬜️" for i in range(10 - math.floor(percentage / 10))])
+        
+        # Build the Dashboard String
+        tmp = (
+            f"✨ {progress_bar}{remaining_bar}\n\n"
+            f"🔋 **Percentage •** {percentage:.1f}%\n"
+            f"🚀 **Speed •** {current / (1024 * 1024 * diff):.2f} MB/s\n"
+            f"🚦 **Size •** {current / (1024 * 1024):.1f} MB / {total / (1024 * 1024):.1f} MB\n"
+            f"⏰ **ETA •** {estimated}\n"
+            f"⌛️ **Elapsed •** {elapsed}"
+        )
     # 2. THE PROGRESS WRITER: Existing status file update logic
     with open(f'{message.id}{type}status.txt', "w") as fileup:
-        fileup.write(f"{current * 100 / total:.1f}%")
+        fileup.write(tmp)
 
 
 # handle private
@@ -592,10 +655,10 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     user_id = message.from_user.id
     user_chat = message.chat.id
     log_chat = int(CHANNEL_ID) if CHANNEL_ID else None
-    
+
     # Check for Customized Upload preference
     custom_destination = await db.get_custom_upload(user_id)
-    
+
     if custom_destination and str(custom_destination).lower() != "off":
         try:
             await client.get_chat_member(custom_destination, "me")
@@ -605,7 +668,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             chat = user_chat
     else:
         chat = user_chat
-    
+
     if batch_temp.IS_BATCH.get(user_id): return 
 
     if "Text" == msg_type:
@@ -617,15 +680,15 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
             return 
 
-    smsg = await client.send_message(user_chat, '**Downloading**', reply_to_message_id=message.id)
+    smsg = await client.send_message(user_chat, '📥 **Preparing Download...**', reply_to_message_id=message.id)
     asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
 
     try:
-        # UPDATED: Mid-Download Kill Switch
+        start_time = time.time()
         file = await acc.download_media(
             msg, 
             progress=progress, 
-            progress_args=[message, "down", user_id, db]
+            progress_args=[message, "down", user_id, db, start_time]
         )
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
@@ -648,11 +711,12 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
     else:
         caption = original_caption
-        
+
     if batch_temp.IS_BATCH.get(user_id): return 
-            
+
     # --- Unified Upload Logic with Kill Switch ---
     try:
+        start_time = time.time()
         if "Document" == msg_type:
             try:
                 ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
@@ -661,7 +725,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_document(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time]
             )
             if ph_path: os.remove(ph_path)
 
@@ -669,12 +733,12 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             try:
                 ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
             except:
-                ph_path = None
+                ph_path = None   
             await client.send_video(
                 chat, file, duration=msg.video.duration, width=msg.video.width, 
                 height=msg.video.height, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time]
             )
             if ph_path: os.remove(ph_path)
 
@@ -686,13 +750,13 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_audio(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time]
             )
             if ph_path: os.remove(ph_path)
 
         elif "Animation" == msg_type:
             await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-        
+
         elif "Sticker" == msg_type:
             await client.send_sticker(chat, file, reply_to_message_id=message.id)
 
@@ -700,7 +764,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_voice(
                 chat, file, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time]
             )
 
         elif "Photo" == msg_type:
@@ -715,10 +779,10 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     # --- Final Cleanup Section ---
     if os.path.exists(f'{message.id}upstatus.txt'): 
         os.remove(f'{message.id}upstatus.txt')
-    
+
     if os.path.exists(file):
         os.remove(file) # Protects your 26GB storage
-        
+
     await client.delete_messages(user_chat, [smsg.id])
 
 
@@ -771,5 +835,6 @@ def get_message_type(msg: pyrogram.types.messages_and_media.message.Message):
         return "Text"
     except:
         pass
-        
 
+
+        
