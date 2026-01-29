@@ -613,35 +613,43 @@ async def progress(current, total, message, type, user_id, db, start_time):
     status = await db.get_status(user_id)
     if status is not None and status != "processing_batch":
         raise Exception("STOP_TRANSMISSION")
-
+    
     now = time.time()
     diff = now - start_time
+    # Define a default in case the 10s timer hasn't triggered yet
+    tmp = "📊 **Calculating Speed and ETA...**"
+
     if round(diff % 10.00) == 0 or current == total:
         percentage = current * 100 / total
-        speed = current / diff
+        speed = current / diff if diff > 0 else 0
+        if diff > 0:
+            speed_mb = current / (1024 * 1024 * diff)
+        else:
+            speed_mb = 0    
         elapsed_time = round(diff)
         eta = round((total - current) / speed) if speed > 0 else 0
         
-        # Formatting units
         elapsed = time.strftime("%-Ss", time.gmtime(elapsed_time))
         estimated = time.strftime("%-Ss", time.gmtime(eta))
         
-        # Progress Bar Logic (10 blocks)
         progress_bar = "".join(["🟧" for i in range(math.floor(percentage / 10))])
         remaining_bar = "".join(["⬜️" for i in range(10 - math.floor(percentage / 10))])
         
-        # Build the Dashboard String
         tmp = (
             f"✨ {progress_bar}{remaining_bar}\n\n"
             f"🔋 **Percentage •** {percentage:.1f}%\n"
-            f"🚀 **Speed •** {current / (1024 * 1024 * diff):.2f} MB/s\n"
+            f"🚀 **Speed •** {speed_mb:.2f} MB/s\n"
             f"🚦 **Size •** {current / (1024 * 1024):.1f} MB / {total / (1024 * 1024):.1f} MB\n"
             f"⏰ **ETA •** {estimated}\n"
             f"⌛️ **Elapsed •** {elapsed}"
         )
-    # 2. THE PROGRESS WRITER: Existing status file update logic
-    with open(f'{message.id}{type}status.txt', "w") as fileup:
-        fileup.write(tmp)
+        
+        # Wrapped in try-except to prevent the 'NoneType' write crash
+        try:
+            with open(f'{message.id}{type}status.txt', "w") as fileup:
+                fileup.write(tmp)
+        except Exception as e:
+            print(f"File Write Error: {e}")
 
 
 # handle private
