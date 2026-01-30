@@ -82,7 +82,7 @@ async def send_start(client: Client, message: Message):
 async def settings_menu(client, callback_query):
     buttons = [[
         InlineKeyboardButton("📝 Set Custom Caption", callback_data="set_caption_action")
-      ],[
+      ],[InlineKeyboardButton("⚡ Parallel Batch", callback_data="parallel_settings")],[
 		InlineKeyboardButton("📤 Customized Upload", callback_data="set_upload_action")
 	  ],[
         InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_start")
@@ -107,6 +107,51 @@ async def back_to_start(client, callback_query):
         text=f"<b>👋 Hi {callback_query.from_user.mention}, I am Save Restricted Content Bot.\n\nI can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+#parallel Batch settings
+@Client.on_callback_query(filters.regex("parallel_settings"))
+async def parallel_settings(client, callback_query):
+    user_id = callback_query.from_user.id
+    # Fetch current setting
+    current_status = await db.get_parallel_status(user_id) 
+    status_text = "🟢 **ON**" if current_status else "🔴 **OFF**"
+    
+    buttons = [[
+        InlineKeyboardButton("✅ Turn ON", callback_data="parallel_on"),
+        InlineKeyboardButton("❌ Turn OFF", callback_data="parallel_off")
+    ], [InlineKeyboardButton("🔙 Back to Settings", callback_data="settings_home")]]
+    
+    await callback_query.message.edit_text(
+        f"⚡ **Parallel Batch Download**\n\n"
+        f"**Current Status:** {status_text}\n\n"
+        "**Feature Description:**\n"
+        "When enabled, the bot begins downloading the **next** file while the **current** file is uploading.\n\n"
+        "**Safety Protocol:**\n"
+        "• Maximum 1 Download + 1 Upload at a time.\n"
+        "• Mandatory 4s cooldown between files.",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+#parallel on/off callbacks
+@Client.on_callback_query(filters.regex("parallel_on"))
+async def parallel_on_cb(client, callback_query):
+    user_id = callback_query.from_user.id
+    # Record the 'ON' choice in MongoDB
+    await db.set_parallel_status(user_id, True) 
+    await callback_query.answer("⚡ Parallel Mode: ON", show_alert=True)
+    # Refresh the menu to show the green status
+    await parallel_settings(client, callback_query)
+
+@Client.on_callback_query(filters.regex("parallel_off"))
+async def parallel_off_cb(client, callback_query):
+    user_id = callback_query.from_user.id
+    # Record the 'OFF' choice in MongoDB
+    await db.set_parallel_status(user_id, False) 
+    await callback_query.answer("❌ Parallel Mode: OFF", show_alert=True)
+    # Refresh the menu to show the red status
+    await parallel_settings(client, callback_query)
+
+
 #set_caption
 @Client.on_callback_query(filters.regex("set_caption_action"))
 async def set_caption_process(client, callback_query):
@@ -386,7 +431,20 @@ async def handle_user_states(client, message):
                 # 2. Initialize session (The connection delay helps DB sync)
                 if LOGIN_SYSTEM == True:
                     user_data = await db.get_session(user_id)
-                    api_id = int(await db.get_api_id(user_id))
+                    
+                    # ✅ ADD THESE CHECKS
+                    if user_data is None:
+                        await message.reply("**For Downloading Restricted Content You Have To /login First.**")
+                        message.stop_propagation()
+                        return
+                    
+                    api_id_value = await db.get_api_id(user_id)
+                    if api_id_value is None:
+                        await message.reply("**Your session is incomplete. Please /login again.**")
+                        message.stop_propagation()
+                        return
+                    
+                    api_id = int(api_id_value)
                     api_hash = await db.get_api_hash(user_id)
                     acc = Client("saverestricted", session_string=user_data, api_hash=api_hash, api_id=api_id)
                     await acc.connect()
@@ -576,7 +634,9 @@ async def run_batch(client, acc, message, start_link, count):
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
     batch_start_time = time.time()
-    
+    upload_lock = asyncio.Semaphore(1)
+    parallel_on = await db.get_parallel_status(user_id) 
+
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
     
@@ -587,37 +647,50 @@ async def run_batch(client, acc, message, start_link, count):
         batch_temp.IS_BATCH[user_id] = False
 
         for i in range(count):
-            # 1. First-file sync delay
+            file_num = i + 1
+            current_msg_id = base_id + i
+
+            # 1. First-file sync delay (KEPT)
             if i == 0: 
                 await asyncio.sleep(2)
+            
+            # NEW: 4s Cooldown for files after the first one
+            if i > 0:
+                await asyncio.sleep(4)
                 
-            # 2. CHECK FOR CANCEL SIGNAL (Pre-transfer check)
+            # 2. CHECK FOR CANCEL SIGNAL (KEPT)
             current_status = await db.get_status(user_id)
             if current_status != "processing_batch":
                 await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
                 return 
 
-            current_msg_id = base_id + i
             try:
-                # 3. Process the file
-                await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time)
+                # 3. Process/Download the file
+                # Modified to pass file_num
+                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num)
+                if not file_path: continue
+
                 
-                # Update the progress message in DM
-                await stats_msg.edit_text(f"📊 **Batch Progress:** {i+1}/{count} files processed.")
+                parallel_on = await db.get_parallel_status(user_id)
+                
+                # 4. DECISION: Parallel or Normal (NEW)
+                if parallel_on and file_path:
+                    # Parallel: Upload in background, loop continues to next download
+                    asyncio.create_task(pipeline_upload(client, acc, message, file_path, upload_lock, file_num, batch_start_time, stats_msg, count))
+                else:
+                    # Normal: Wait for upload to finish before loop continues
+                    await pipeline_upload(client, acc, message, file_path, upload_lock, file_num, batch_start_time, stats_msg, count)
                 
             except Exception as e:
-                # 4. Handle Mid-Transfer Kill Switch
                 if "STOP_TRANSMISSION" in str(e):
                     await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
-                    return # Exit immediately
-                
+                    return 
                 print(f"Batch Item Error: {e}")
                 continue
         
         await stats_msg.reply("✅ **Batch Processing Complete!**")
 
     finally:
-        # 5. Clean up state and session
         batch_temp.IS_BATCH[user_id] = True
         await db.set_status(user_id, None)
         if LOGIN_SYSTEM == True:
@@ -625,6 +698,23 @@ async def run_batch(client, acc, message, start_link, count):
                 await acc.disconnect()
             except:
                 pass
+
+#pipeline_upload            
+async def pipeline_upload(client, acc, message, file, lock, file_num, start_time, stats_msg, total_count):
+    """Worker that handles the 'Upload Bridge' logic"""
+    # This lock acts as a 'One-Way Gate' to prevent 2 uploads at once
+    async with lock: 
+        try:
+            # The actual upload is handled inside handle_private
+            # This worker waits for that upload to finish and updates the batch stats
+            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+            
+            # Final cleanup of the specific file to save your 26GB EC2 storage
+            if os.path.exists(file): 
+                os.remove(file)
+        except Exception as e:
+            print(f"Upload Worker Error on File {file_num}: {e}")
+
 
 #clock function
 def get_readable_time(seconds: int) -> str:
@@ -640,7 +730,7 @@ def get_readable_time(seconds: int) -> str:
 
 
 #cancel check and progress function
-async def progress(current, total, message, type, user_id, db, start_time):
+async def progress(current, total, message, type, user_id, db, start_time, file_num=1):
     status = await db.get_status(user_id)
     if status is not None and status not in ["processing_batch", "processing_single"]:
         raise Exception("STOP_TRANSMISSION")
@@ -669,6 +759,7 @@ async def progress(current, total, message, type, user_id, db, start_time):
         remaining_bar = "".join(["⬜️" for i in range(10 - math.floor(percentage / 10))])
         
         tmp = (
+            f"📦 **File No • {file_num}**\n"
             f"✨ {progress_bar}{remaining_bar}\n\n"
             f"🔋 **Percentage •** {percentage:.1f}%\n"
             f"🚀 **Speed •** {speed_mb:.2f} MB/s\n"
@@ -732,6 +823,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         )
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
+
+        return file    
     except Exception as e:
         if str(e) == "STOP_TRANSMISSION":
             await smsg.edit("**🛑 Batch Stopped Mid-Download.**")
