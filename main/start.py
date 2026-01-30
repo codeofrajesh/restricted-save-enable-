@@ -823,7 +823,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         )
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
-
+        if batch_temp.IS_BATCH.get(user_id) == False:
+            return file
 
     except Exception as e:
         if str(e) == "STOP_TRANSMISSION":
@@ -833,9 +834,10 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id) 
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
-        return await smsg.delete()
+        await smsg.delete()
+        return None
 
-    if batch_temp.IS_BATCH.get(user_id): return 
+
     asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, chat))
 
     user_custom = await db.get_custom_caption(user_id)
@@ -843,9 +845,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if user_custom and user_custom.lower() != "off":
         caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
     else:
-        caption = original_caption
-
-    if batch_temp.IS_BATCH.get(user_id): return 
+        caption = original_caption 
 
     # --- Unified Upload Logic with Kill Switch ---
     try:
@@ -916,8 +916,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if os.path.exists(file):
         os.remove(file) # Protects your 26GB storage
 
-    await client.delete_messages(user_chat, [smsg.id])
-    return file    
+    await client.delete_messages(user_chat, [smsg.id]) 
+    return file   
 
 
 # get the type of message
