@@ -1020,11 +1020,11 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     # --- Final Cleanup Section ---
     if file:  # ✅ Check if file is not None
-    if os.path.exists(f'{message.id}upstatus.txt'): 
-        os.remove(f'{message.id}upstatus.txt')
+        if os.path.exists(f'{message.id}upstatus.txt'): 
+            os.remove(f'{message.id}upstatus.txt')
 
-    if os.path.exists(file):
-        os.remove(file)
+        if os.path.exists(file):
+            os.remove(file)
 
     try:
         await client.delete_messages(user_chat, [smsg.id])
