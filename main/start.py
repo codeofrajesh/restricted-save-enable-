@@ -776,7 +776,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
 
 
 # handle private
-async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None):
+async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1):
     msg: Message = await acc.get_messages(chatid, msgid)
     if msg.empty: return 
     msg_type = get_message_type(msg)
@@ -819,12 +819,12 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         file = await acc.download_media(
             msg, 
             progress=progress, 
-            progress_args=[message, "down", user_id, db, start_time]
+            progress_args=[message, "down", user_id, db, start_time, file_num]
         )
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
 
-        return file    
+
     except Exception as e:
         if str(e) == "STOP_TRANSMISSION":
             await smsg.edit("**🛑 Batch Stopped Mid-Download.**")
@@ -858,7 +858,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_document(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -871,7 +871,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 chat, file, duration=msg.video.duration, width=msg.video.width, 
                 height=msg.video.height, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -883,7 +883,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_audio(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -897,7 +897,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_voice(
                 chat, file, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
 
         elif "Photo" == msg_type:
@@ -917,6 +917,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         os.remove(file) # Protects your 26GB storage
 
     await client.delete_messages(user_chat, [smsg.id])
+    return file    
 
 
 # get the type of message
