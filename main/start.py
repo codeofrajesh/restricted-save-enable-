@@ -674,9 +674,25 @@ async def run_batch(client, acc, message, start_link, count):
             try:
                 # 3. Process/Download the file
                 # Modified to pass file_num
-                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num, download_semaphore, upload_semaphore)
-                if not file_path: continue
-                await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files processed.")
+                if parallel_on:
+                    print(f"DEBUG: File {file_num} created as background task")
+                    asyncio.create_task(handle_file_pipeline(
+                        client, acc, message, chat_id, current_msg_id,
+                        batch_start_time, file_num,
+                        download_semaphore, upload_semaphore,
+                        user_id, stats_msg, count
+                    ))
+                # Loop continues immediately to next file!
+            
+                else:
+                    print(f"DEBUG: File {file_num} waiting for complete processing")
+                    await handle_private(
+                        client, acc, message, chat_id, current_msg_id,
+                        batch_start_time, file_num,
+                        download_semaphore, upload_semaphore
+                    )
+                    # Update progress
+                    await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files processed.")
 
                 
                 
@@ -699,20 +715,29 @@ async def run_batch(client, acc, message, start_link, count):
                 pass
 
 #pipeline_upload            
-async def pipeline_upload(client, acc, message, file, lock, file_num, start_time, stats_msg, total_count):
-    """Worker that handles the 'Upload Bridge' logic"""
-    # This lock acts as a 'One-Way Gate' to prevent 2 uploads at once
-    async with lock: 
-        try:
-            # The actual upload is handled inside handle_private
-            # This worker waits for that upload to finish and updates the batch stats
-            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
-            
-            # Final cleanup of the specific file to save your 26GB EC2 storage
-            if os.path.exists(file): 
-                os.remove(file)
-        except Exception as e:
-            print(f"Upload Worker Error on File {file_num}: {e}")
+async def handle_file_pipeline(
+    client, acc, message, chat_id, current_msg_id, 
+    batch_start_time, file_num, 
+    download_semaphore, upload_semaphore,
+    user_id, stats_msg, total_count
+):
+    """
+    Wrapper that handles file processing and updates progress
+    Used for non-blocking (parallel) execution
+    """
+    try:
+        await handle_private(
+            client, acc, message, chat_id, current_msg_id,
+            batch_start_time, file_num,
+            download_semaphore, upload_semaphore
+        )
+        
+        # Update progress after complete processing
+        await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+        
+    except Exception as e:
+        if "STOP_TRANSMISSION" not in str(e):
+            print(f"Pipeline Error on File {file_num}: {e}")
 
 
 #clock function
