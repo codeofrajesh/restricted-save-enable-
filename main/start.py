@@ -634,8 +634,15 @@ async def run_batch(client, acc, message, start_link, count):
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
     batch_start_time = time.time()
-    upload_lock = asyncio.Semaphore(1)
     parallel_on = await db.get_parallel_status(user_id) 
+
+    if parallel_on:
+        download_semaphore = asyncio.Semaphore(1)
+        upload_semaphore = asyncio.Semaphore(1)
+    else:
+        # OFF mode: No semaphores means no restriction
+        download_semaphore = None
+        upload_semaphore = None
 
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
@@ -667,19 +674,11 @@ async def run_batch(client, acc, message, start_link, count):
             try:
                 # 3. Process/Download the file
                 # Modified to pass file_num
-                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num)
+                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num, download_semaphore, upload_semaphore)
                 if not file_path: continue
+                await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files processed.")
 
                 
-                parallel_on = await db.get_parallel_status(user_id)
-                
-                # 4. DECISION: Parallel or Normal (NEW)
-                if parallel_on and file_path:
-                    # Parallel: Upload in background, loop continues to next download
-                    asyncio.create_task(pipeline_upload(client, acc, message, file_path, upload_lock, file_num, batch_start_time, stats_msg, count))
-                else:
-                    # Normal: Wait for upload to finish before loop continues
-                    await pipeline_upload(client, acc, message, file_path, upload_lock, file_num, batch_start_time, stats_msg, count)
                 
             except Exception as e:
                 if "STOP_TRANSMISSION" in str(e):
@@ -776,7 +775,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
 
 
 # handle private
-async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1):
+async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_semaphore=None, upload_semaphore=None):
     msg: Message = await acc.get_messages(chatid, msgid)
     if msg.empty: return 
     msg_type = get_message_type(msg)
@@ -816,15 +815,26 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     try:
         start_time = batch_time if batch_time else time.time()
-        file = await acc.download_media(
-            msg, 
-            progress=progress, 
-            progress_args=[message, "down", user_id, db, start_time, file_num]
+        
+        # ACQUIRE DOWNLOAD SEMAPHORE - Only 1 download at a time
+        if download_semaphore:
+            async with download_semaphore:
+                print(f"DEBUG: File {file_num} download STARTED")
+                file = await acc.download_media(
+                    msg, 
+                    progress=progress, 
+                    progress_args=[message, "down", user_id, db, start_time, file_num]
+                )
+                print(f"DEBUG: File {file_num} download COMPLETED")
+        else:
+            # Fallback if semaphore not provided (single file mode)
+            file = await acc.download_media(
+                msg, 
+                progress=progress, 
+                progress_args=[message, "down", user_id, db, start_time, file_num]
         )
         if os.path.exists(f'{message.id}downstatus.txt'):
             os.remove(f'{message.id}downstatus.txt')
-        if batch_temp.IS_BATCH.get(user_id) == False:
-            return file
 
     except Exception as e:
         if str(e) == "STOP_TRANSMISSION":
@@ -848,66 +858,133 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         caption = original_caption 
 
     # --- Unified Upload Logic with Kill Switch ---
-    try:
-        start_time = batch_time if batch_time else time.time()
-        if "Document" == msg_type:
+    if upload_semaphore:
+        async with upload_semaphore:
+            print(f"DEBUG: File {file_num} upload STARTED")
             try:
-                ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
-            except:
-                ph_path = None
-            await client.send_document(
-                chat, file, thumb=ph_path, caption=caption, 
-                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-            )
-            if ph_path: os.remove(ph_path)
+                start_time = batch_time if batch_time else time.time()
+                if "Document" == msg_type:
+                    try:
+                        ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
+                    except:
+                        ph_path = None
+                    await client.send_document(
+                        chat, file, thumb=ph_path, caption=caption, 
+                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                    )
+                    if ph_path: os.remove(ph_path)
 
-        elif "Video" == msg_type:
-            try:
-                ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
-            except:
-                ph_path = None   
-            await client.send_video(
-                chat, file, duration=msg.video.duration, width=msg.video.width, 
-                height=msg.video.height, thumb=ph_path, caption=caption, 
-                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-            )
-            if ph_path: os.remove(ph_path)
+                elif "Video" == msg_type:
+                    try:
+                        ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
+                    except:
+                        ph_path = None   
+                    await client.send_video(
+                        chat, file, duration=msg.video.duration, width=msg.video.width, 
+                        height=msg.video.height, thumb=ph_path, caption=caption, 
+                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                    )
+                    if ph_path: os.remove(ph_path)
 
-        elif "Audio" == msg_type:
-            try:
-                ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
-            except:
-                ph_path = None
-            await client.send_audio(
-                chat, file, thumb=ph_path, caption=caption, 
-                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-            )
-            if ph_path: os.remove(ph_path)
+                elif "Audio" == msg_type:
+                    try:
+                        ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
+                    except:
+                        ph_path = None
+                    await client.send_audio(
+                        chat, file, thumb=ph_path, caption=caption, 
+                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                    )
+                    if ph_path: os.remove(ph_path)
 
-        elif "Animation" == msg_type:
-            await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+                elif "Animation" == msg_type:
+                    await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
-        elif "Sticker" == msg_type:
-            await client.send_sticker(chat, file, reply_to_message_id=message.id)
+                elif "Sticker" == msg_type:
+                    await client.send_sticker(chat, file, reply_to_message_id=message.id)
 
-        elif "Voice" == msg_type:
-            await client.send_voice(
-                chat, file, caption=caption, 
-                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-            )
+                elif "Voice" == msg_type:
+                    await client.send_voice(
+                        chat, file, caption=caption, 
+                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                    )
 
-        elif "Photo" == msg_type:
-            await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+                elif "Photo" == msg_type:
+                    await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
-    except Exception as e:
-        if str(e) == "STOP_TRANSMISSION":
-            await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
-        elif ERROR_MESSAGE:
-            await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
+            except Exception as e:
+                if str(e) == "STOP_TRANSMISSION":
+                    await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
+                elif ERROR_MESSAGE:
+                    await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
+
+    else:
+        try:
+            start_time = batch_time if batch_time else time.time()
+            if "Document" == msg_type:
+                try:
+                    ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
+                except:
+                    ph_path = None
+                await client.send_document(
+                    chat, file, thumb=ph_path, caption=caption, 
+                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                )
+                if ph_path: os.remove(ph_path)
+
+            elif "Video" == msg_type:
+                try:
+                    ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
+                except:
+                    ph_path = None   
+                await client.send_video(
+                    chat, file, duration=msg.video.duration, width=msg.video.width, 
+                    height=msg.video.height, thumb=ph_path, caption=caption, 
+                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                )
+                if ph_path: os.remove(ph_path)
+
+            elif "Audio" == msg_type:
+                try:
+                    ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
+                except:
+                    ph_path = None
+                await client.send_audio(
+                    chat, file, thumb=ph_path, caption=caption, 
+                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                )
+                if ph_path: os.remove(ph_path)
+
+            elif "Animation" == msg_type:
+                await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+
+            elif "Sticker" == msg_type:
+                await client.send_sticker(chat, file, reply_to_message_id=message.id)
+
+            elif "Voice" == msg_type:
+                await client.send_voice(
+                    chat, file, caption=caption, 
+                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+                )
+
+            elif "Photo" == msg_type:
+                await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+
+        except Exception as e:
+            if str(e) == "STOP_TRANSMISSION":
+                await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
+            elif ERROR_MESSAGE:
+                await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
+
+
 
     # --- Final Cleanup Section ---
     if os.path.exists(f'{message.id}upstatus.txt'): 
