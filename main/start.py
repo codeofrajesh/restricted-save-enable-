@@ -652,49 +652,41 @@ async def run_batch(client, acc, message, start_link, count):
     try:
         await db.set_status(user_id, "processing_batch")
         batch_temp.IS_BATCH[user_id] = False
+        tasks = []
 
         for i in range(count):
             file_num = i + 1
             current_msg_id = base_id + i
 
-            # 1. First-file sync delay (KEPT)
             if i == 0: 
                 await asyncio.sleep(2)
-            
-            # NEW: 4s Cooldown for files after the first one
-            if i > 0:
+            elif i > 0:
                 await asyncio.sleep(4)
-                
-            # 2. CHECK FOR CANCEL SIGNAL (KEPT)
+                    
             current_status = await db.get_status(user_id)
             if current_status != "processing_batch":
                 await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
                 return 
 
             try:
-                # 3. Process/Download the file
-                # Modified to pass file_num
                 if parallel_on:
-                    print(f"DEBUG: File {file_num} created as background task")
-                    asyncio.create_task(handle_file_pipeline(
+                    # ✅ Store task and continue
+                    task = asyncio.create_task(handle_file_pipeline(
                         client, acc, message, chat_id, current_msg_id,
                         batch_start_time, file_num,
                         download_semaphore, upload_semaphore,
                         user_id, stats_msg, count
                     ))
-                # Loop continues immediately to next file!
-            
+                    tasks.append(task)
+                    print(f"DEBUG: File {file_num} created as background task")
                 else:
-                    print(f"DEBUG: File {file_num} waiting for complete processing")
+                    # Sequential mode
                     await handle_private(
                         client, acc, message, chat_id, current_msg_id,
                         batch_start_time, file_num,
                         download_semaphore, upload_semaphore
                     )
-                    # Update progress
                     await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files processed.")
-
-                
                 
             except Exception as e:
                 if "STOP_TRANSMISSION" in str(e):
@@ -702,7 +694,13 @@ async def run_batch(client, acc, message, start_link, count):
                     return 
                 print(f"Batch Item Error: {e}")
                 continue
-        
+
+        # ✅ Wait for all background tasks to complete
+        if parallel_on and tasks:
+            print(f"DEBUG: Waiting for {len(tasks)} background tasks...")
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            print(f"DEBUG: All {len(tasks)} tasks completed!")
+
         await stats_msg.reply("✅ **Batch Processing Complete!**")
 
     finally:
@@ -721,24 +719,33 @@ async def handle_file_pipeline(
     download_semaphore, upload_semaphore,
     user_id, stats_msg, total_count
 ):
-    """
-    Wrapper that handles file processing and updates progress
-    Used for non-blocking (parallel) execution
-    """
+    """Non-blocking file processing for parallel mode"""
+    
+    # ✅ Create unique message ID for status files
+    class UniqueMessage:
+        def __init__(self, original_msg, file_num):
+            self.id = f"{original_msg.id}_file_{file_num}"
+            self.chat = original_msg.chat
+            self.from_user = original_msg.from_user
+    
+    unique_message = UniqueMessage(message, file_num)
+    
     try:
+        print(f"DEBUG: File {file_num} pipeline starting...")
         await handle_private(
-            client, acc, message, chat_id, current_msg_id,
+            client, acc, unique_message,
+            chat_id, current_msg_id,
             batch_start_time, file_num,
             download_semaphore, upload_semaphore
         )
+        print(f"DEBUG: File {file_num} pipeline completed successfully")
         
-        # Update progress after complete processing
+        # Update progress after file completes
         await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
         
     except Exception as e:
         if "STOP_TRANSMISSION" not in str(e):
             print(f"Pipeline Error on File {file_num}: {e}")
-
 
 #clock function
 def get_readable_time(seconds: int) -> str:
@@ -1012,13 +1019,18 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
 
     # --- Final Cleanup Section ---
+    if file:  # ✅ Check if file is not None
     if os.path.exists(f'{message.id}upstatus.txt'): 
         os.remove(f'{message.id}upstatus.txt')
 
     if os.path.exists(file):
-        os.remove(file) # Protects your 26GB storage
+        os.remove(file)
 
-    await client.delete_messages(user_chat, [smsg.id]) 
+    try:
+        await client.delete_messages(user_chat, [smsg.id])
+    except:
+        pass
+
     return file   
 
 
