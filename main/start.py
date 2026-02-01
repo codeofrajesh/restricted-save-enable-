@@ -696,6 +696,7 @@ async def run_batch(client, acc, message, start_link, count):
             try:
                 await acc.disconnect()
             except:
+                pass
 
 #clock function
 def get_readable_time(seconds: int) -> str:
