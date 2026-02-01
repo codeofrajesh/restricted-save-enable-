@@ -95,18 +95,14 @@ class Database:
         user = await self.col.find_one({'id': int(id)})
         return user.get('batch_data') if user else None
 
-    async def set_parallel_status(self, user_id, status: bool):
-        """Stores True for ON, False for OFF in the user's document."""
-        await self.col.update_one(
-            {"id": user_id}, 
-            {"$set": {"parallel_batch": status}}, 
-            upsert=True
-        )
+    async def set_parallel_status(self, id, status: bool):
+        """Sets the Parallel Batch mode (True/False)."""
+        await self.col.update_one({'id': int(id)}, {'$set': {'parallel_batch': status}})
 
-    async def get_parallel_status(self, user_id):
-        """Retrieves the choice. Defaults to False (OFF) if not set."""
-        user = await self.col.find_one({"id": user_id})
-        return user.get("parallel_batch", False) if user else False
+    async def get_parallel_status(self, id):
+        """Retrieves Parallel Batch status. Defaults to False."""
+        user = await self.col.find_one({'id': int(id)})
+        return user.get('parallel_batch', False) if user else False
 
 db = Database(DB_URI, "Razzeshbot")
 print("Database Connected processing bot")

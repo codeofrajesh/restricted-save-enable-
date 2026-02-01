@@ -82,9 +82,11 @@ async def send_start(client: Client, message: Message):
 async def settings_menu(client, callback_query):
     buttons = [[
         InlineKeyboardButton("📝 Set Custom Caption", callback_data="set_caption_action")
-      ],[InlineKeyboardButton("⚡ Parallel Batch", callback_data="parallel_settings")],[
+      ],[
 		InlineKeyboardButton("📤 Customized Upload", callback_data="set_upload_action")
 	  ],[
+          InlineKeyboardButton("⚡ Parallel Batch", callback_data="parallel_settings")
+      ],[
         InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_start")
     ]]
     await callback_query.message.edit_text(
@@ -107,51 +109,6 @@ async def back_to_start(client, callback_query):
         text=f"<b>👋 Hi {callback_query.from_user.mention}, I am Save Restricted Content Bot.\n\nI can send you restricted content by its post link.\n\nFor downloading restricted content /login first.\n\nKnow how to use bot by - /help</b>",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-#parallel Batch settings
-@Client.on_callback_query(filters.regex("parallel_settings"))
-async def parallel_settings(client, callback_query):
-    user_id = callback_query.from_user.id
-    # Fetch current setting
-    current_status = await db.get_parallel_status(user_id) 
-    status_text = "🟢 **ON**" if current_status else "🔴 **OFF**"
-    
-    buttons = [[
-        InlineKeyboardButton("✅ Turn ON", callback_data="parallel_on"),
-        InlineKeyboardButton("❌ Turn OFF", callback_data="parallel_off")
-    ], [InlineKeyboardButton("🔙 Back to Settings", callback_data="settings_home")]]
-    
-    await callback_query.message.edit_text(
-        f"⚡ **Parallel Batch Download**\n\n"
-        f"**Current Status:** {status_text}\n\n"
-        "**Feature Description:**\n"
-        "When enabled, the bot begins downloading the **next** file while the **current** file is uploading.\n\n"
-        "**Safety Protocol:**\n"
-        "• Maximum 1 Download + 1 Upload at a time.\n"
-        "• Mandatory 4s cooldown between files.",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-
-#parallel on/off callbacks
-@Client.on_callback_query(filters.regex("parallel_on"))
-async def parallel_on_cb(client, callback_query):
-    user_id = callback_query.from_user.id
-    # Record the 'ON' choice in MongoDB
-    await db.set_parallel_status(user_id, True) 
-    await callback_query.answer("⚡ Parallel Mode: ON", show_alert=True)
-    # Refresh the menu to show the green status
-    await parallel_settings(client, callback_query)
-
-@Client.on_callback_query(filters.regex("parallel_off"))
-async def parallel_off_cb(client, callback_query):
-    user_id = callback_query.from_user.id
-    # Record the 'OFF' choice in MongoDB
-    await db.set_parallel_status(user_id, False) 
-    await callback_query.answer("❌ Parallel Mode: OFF", show_alert=True)
-    # Refresh the menu to show the red status
-    await parallel_settings(client, callback_query)
-
-
 #set_caption
 @Client.on_callback_query(filters.regex("set_caption_action"))
 async def set_caption_process(client, callback_query):
@@ -168,7 +125,7 @@ async def set_caption_process(client, callback_query):
         "• `off` - To turn off custom captions completely.\n"
         "• `/cancel` - To stop and go back.\n\n"
         "**Send your caption now:**",
-    )
+    ) 
 	
 #customized upload
 @Client.on_callback_query(filters.regex("set_upload_action"))
@@ -205,6 +162,32 @@ async def cb_endlink(client, cb):
         "• This link must be from the **same channel** as the start link.\n"
         "• Range limit is 100 messages."
     )
+
+@Client.on_callback_query(filters.regex("parallel_settings"))
+async def parallel_settings(client, callback_query):
+    user_id = callback_query.from_user.id
+    status = await db.get_parallel_status(user_id)
+    status_text = "🟢 **ON**" if status else "🔴 **OFF**"
+    
+    buttons = [[
+        InlineKeyboardButton("✅ ON", callback_data="parallel_on"),
+        InlineKeyboardButton("❌ OFF", callback_data="parallel_off")
+    ], [InlineKeyboardButton("🔙 Back", callback_data="settings_home")]]
+    
+    await callback_query.message.edit_text(
+        f"⚡ **Parallel Batch Download**\n\n"
+        f"**Current Status:** {status_text}\n\n"
+        "When **ON**, the bot downloads the next file while the previous one uploads.\n"
+        "Maximum 1 Download + 1 Upload at a time.",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+@Client.on_callback_query(filters.regex("parallel_on|parallel_off"))
+async def parallel_toggle(client, callback_query):
+    is_on = callback_query.data == "parallel_on"
+    await db.set_parallel_status(callback_query.from_user.id, is_on)
+    await callback_query.answer(f"Parallel Batch: {'Enabled' if is_on else 'Disabled'}")
+    await parallel_settings(client, callback_query)    
 	
 # help command
 @Client.on_message(filters.command(["help"]))
@@ -431,20 +414,7 @@ async def handle_user_states(client, message):
                 # 2. Initialize session (The connection delay helps DB sync)
                 if LOGIN_SYSTEM == True:
                     user_data = await db.get_session(user_id)
-                    
-                    # ✅ ADD THESE CHECKS
-                    if user_data is None:
-                        await message.reply("**For Downloading Restricted Content You Have To /login First.**")
-                        message.stop_propagation()
-                        return
-                    
-                    api_id_value = await db.get_api_id(user_id)
-                    if api_id_value is None:
-                        await message.reply("**Your session is incomplete. Please /login again.**")
-                        message.stop_propagation()
-                        return
-                    
-                    api_id = int(api_id_value)
+                    api_id = int(await db.get_api_id(user_id))
                     api_hash = await db.get_api_hash(user_id)
                     acc = Client("saverestricted", session_string=user_data, api_hash=api_hash, api_id=api_id)
                     await acc.connect()
@@ -627,125 +597,105 @@ async def save(client: Client, message: Message):
             
             # Unlock batch status for next task
             batch_temp.IS_BATCH[message.from_user.id] = True
-		
+
+#upload worker 
+async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count):
+    """The Upload Lane: Processes files one by one in FIFO order"""
+    while True:
+        data = await upload_queue.get()
+        if data is None: # Shutdown signal
+            break
+        
+        file_path, file_num, start_time = data
+        try:
+            # We call handle_private with 'upload_only_file' to skip download phase
+            await handle_private(client, acc, message, None, None, start_time, file_num, upload_only_file=file_path)
+            
+            # Update the batch status message after each successful upload
+            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+        except Exception as e:
+            print(f"Upload Track Error on File {file_num}: {e}")
+        finally:
+            upload_queue.task_done() # Clears the slot for the next file
+            
+
 # run batch helper function
 async def run_batch(client, acc, message, start_link, count):
     user_id = message.from_user.id
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
     batch_start_time = time.time()
-    parallel_on = await db.get_parallel_status(user_id) 
-
-    if parallel_on:
-        download_semaphore = asyncio.Semaphore(1)
-        upload_semaphore = asyncio.Semaphore(1)
-    else:
-        # OFF mode: No semaphores means no restriction
-        download_semaphore = None
-        upload_semaphore = None
-
+    
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
     
+    # 1. INITIALIZE RAILWAY TRACKS
+    # The Queue acts as the 'buffer' between download and upload lanes
+    upload_queue = asyncio.Queue(maxsize=1) 
+    parallel_on = await db.get_parallel_status(user_id) 
+    
     stats_msg = await message.reply(f"📊 **Batch Started:** 0/{count} files processed.")
+    
+    # 2. START THE UPLOAD WORKER (TRACK 2)
+    uploader = asyncio.create_task(upload_worker(client, acc, message, upload_queue, stats_msg, count))
     
     try:
         await db.set_status(user_id, "processing_batch")
         batch_temp.IS_BATCH[user_id] = False
-        tasks = []
 
         for i in range(count):
             file_num = i + 1
             current_msg_id = base_id + i
 
+            # 3. FIRST-FILE SYNC & 4S RAILWAY COOLDOWN
             if i == 0: 
                 await asyncio.sleep(2)
-            elif i > 0:
-                await asyncio.sleep(4)
-                    
+            else:
+                await asyncio.sleep(4) 
+                
+            # 4. PRE-TRANSFER CANCEL CHECK
             current_status = await db.get_status(user_id)
             if current_status != "processing_batch":
-                await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
-                return 
+                await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i-1}/{count} files.")
+                break 
 
             try:
-                if parallel_on:
-                    # ✅ Store task and continue
-                    task = asyncio.create_task(handle_file_pipeline(
-                        client, acc, message, chat_id, current_msg_id,
-                        batch_start_time, file_num,
-                        download_semaphore, upload_semaphore,
-                        user_id, stats_msg, count
-                    ))
-                    tasks.append(task)
-                    print(f"DEBUG: File {file_num} created as background task")
-                else:
-                    # Sequential mode
-                    await handle_private(
-                        client, acc, message, chat_id, current_msg_id,
-                        batch_start_time, file_num,
-                        download_semaphore, upload_semaphore
-                    )
-                    await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files processed.")
+                # 5. DOWNLOAD LANE (TRACK 1)
+                # 'download_only=True' tells handle_private to stop after saving the file
+                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num, download_only=True)
+                
+                if file_path and os.path.exists(file_path):
+                    # 6. FEED THE UPLOAD LANE
+                    if parallel_on:
+                        # Parallel: Put in queue and immediately start next download cooldown
+                        await upload_queue.put((file_path, file_num, time.time()))
+                    else:
+                        # Sequential: Put in queue and wait for it to be processed
+                        await upload_queue.put((file_path, file_num, time.time()))
+                        await upload_queue.join() 
                 
             except Exception as e:
+                # 7. MID-TRANSFER KILL SWITCH
                 if "STOP_TRANSMISSION" in str(e):
-                    await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
-                    return 
+                    await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i-1}/{count} files.")
+                    break 
+                
                 print(f"Batch Item Error: {e}")
                 continue
-
-        # ✅ Wait for all background tasks to complete
-        if parallel_on and tasks:
-            print(f"DEBUG: Waiting for {len(tasks)} background tasks...")
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            print(f"DEBUG: All {len(tasks)} tasks completed!")
-
+        
+        # 8. SIGNAL WORKER TO SHUTDOWN AFTER ALL FILES QUEUED
+        await upload_queue.put(None) 
+        await uploader
         await stats_msg.reply("✅ **Batch Processing Complete!**")
 
     finally:
+        # 9. CLEAN UP STATE AND SESSION
         batch_temp.IS_BATCH[user_id] = True
         await db.set_status(user_id, None)
         if LOGIN_SYSTEM == True:
             try:
                 await acc.disconnect()
             except:
-                pass
-
-#pipeline_upload            
-async def handle_file_pipeline(
-    client, acc, message, chat_id, current_msg_id, 
-    batch_start_time, file_num, 
-    download_semaphore, upload_semaphore,
-    user_id, stats_msg, total_count
-):
-    """Non-blocking file processing for parallel mode"""
-    
-    # ✅ Create unique message ID for status files
-    class UniqueMessage:
-        def __init__(self, original_msg, file_num):
-            self.id = f"{original_msg.id}_file_{file_num}"
-            self.chat = original_msg.chat
-            self.from_user = original_msg.from_user
-    
-    unique_message = UniqueMessage(message, file_num)
-    
-    try:
-        print(f"DEBUG: File {file_num} pipeline starting...")
-        await handle_private(
-            client, acc, unique_message,
-            chat_id, current_msg_id,
-            batch_start_time, file_num,
-            download_semaphore, upload_semaphore
-        )
-        print(f"DEBUG: File {file_num} pipeline completed successfully")
-        
-        # Update progress after file completes
-        await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
-        
-    except Exception as e:
-        if "STOP_TRANSMISSION" not in str(e):
-            print(f"Pipeline Error on File {file_num}: {e}")
 
 #clock function
 def get_readable_time(seconds: int) -> str:
@@ -761,7 +711,7 @@ def get_readable_time(seconds: int) -> str:
 
 
 #cancel check and progress function
-async def progress(current, total, message, type, user_id, db, start_time, file_num=1):
+async def progress(current, total, message, type, user_id, db, start_time, file_num):
     status = await db.get_status(user_id)
     if status is not None and status not in ["processing_batch", "processing_single"]:
         raise Exception("STOP_TRANSMISSION")
@@ -790,7 +740,6 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         remaining_bar = "".join(["⬜️" for i in range(10 - math.floor(percentage / 10))])
         
         tmp = (
-            f"📦 **File No • {file_num}**\n"
             f"✨ {progress_bar}{remaining_bar}\n\n"
             f"🔋 **Percentage •** {percentage:.1f}%\n"
             f"🚀 **Speed •** {speed_mb:.2f} MB/s\n"
@@ -807,7 +756,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
 
 
 # handle private
-async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_semaphore=None, upload_semaphore=None):
+async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_only=False, upload_only_file=None):
     msg: Message = await acc.get_messages(chatid, msgid)
     if msg.empty: return 
     msg_type = get_message_type(msg)
@@ -817,6 +766,12 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     user_id = message.from_user.id
     user_chat = message.chat.id
     log_chat = int(CHANNEL_ID) if CHANNEL_ID else None
+    if upload_only_file:
+        file = upload_only_file
+        # Move directly to the upload phase by skipping the download code
+        goto_upload = True 
+    else:
+        goto_upload = False
 
     # Check for Customized Upload preference
     custom_destination = await db.get_custom_upload(user_id)
@@ -831,55 +786,42 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     else:
         chat = user_chat
 
-    if batch_temp.IS_BATCH.get(user_id): return 
+    if not goto_upload:
+        if "Text" == msg_type:
+            try:
+                await client.send_message(chat, msg.text, entities=msg.entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+                return 
+            except Exception as e:
+                if ERROR_MESSAGE:
+                    await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
+                return 
 
-    if "Text" == msg_type:
+        smsg = await client.send_message(user_chat, '📥 **Preparing Download...**', reply_to_message_id=message.id)
+        asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
+
         try:
-            await client.send_message(chat, msg.text, entities=msg.entities, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-            return 
-        except Exception as e:
-            if ERROR_MESSAGE:
-                await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
-            return 
-
-    smsg = await client.send_message(user_chat, '📥 **Preparing Download...**', reply_to_message_id=message.id)
-    asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
-
-    try:
-        start_time = batch_time if batch_time else time.time()
-        
-        # ACQUIRE DOWNLOAD SEMAPHORE - Only 1 download at a time
-        if download_semaphore:
-            async with download_semaphore:
-                print(f"DEBUG: File {file_num} download STARTED")
-                file = await acc.download_media(
-                    msg, 
-                    progress=progress, 
-                    progress_args=[message, "down", user_id, db, start_time, file_num]
-                )
-                print(f"DEBUG: File {file_num} download COMPLETED")
-        else:
-            # Fallback if semaphore not provided (single file mode)
+            start_time = batch_time if batch_time else time.time()
             file = await acc.download_media(
                 msg, 
                 progress=progress, 
                 progress_args=[message, "down", user_id, db, start_time, file_num]
-        )
-        if os.path.exists(f'{message.id}downstatus.txt'):
-            os.remove(f'{message.id}downstatus.txt')
+            )
+            if os.path.exists(f'{message.id}downstatus.txt'):
+                os.remove(f'{message.id}downstatus.txt')
+            if download_only:
+                return file    
+        except Exception as e:
+            if str(e) == "STOP_TRANSMISSION":
+                await smsg.edit("**🛑 Batch Stopped Mid-Download.**")
+                return
+            elif ERROR_MESSAGE:
+                await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id) 
+            if os.path.exists(f'{message.id}downstatus.txt'):
+                os.remove(f'{message.id}downstatus.txt')
+            return await smsg.delete()
 
-    except Exception as e:
-        if str(e) == "STOP_TRANSMISSION":
-            await smsg.edit("**🛑 Batch Stopped Mid-Download.**")
-            return
-        elif ERROR_MESSAGE:
-            await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id) 
-        if os.path.exists(f'{message.id}downstatus.txt'):
-            os.remove(f'{message.id}downstatus.txt')
-        await smsg.delete()
-        return None
-
-
+    if goto_upload:
+        smsg = await client.send_message(user_chat, '📤 **Preparing Upload...**', reply_to_message_id=message.id) 
     asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, chat))
 
     user_custom = await db.get_custom_caption(user_id)
@@ -887,151 +829,78 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     if user_custom and user_custom.lower() != "off":
         caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
     else:
-        caption = original_caption 
+        caption = original_caption
 
     # --- Unified Upload Logic with Kill Switch ---
-    if upload_semaphore:
-        async with upload_semaphore:
-            print(f"DEBUG: File {file_num} upload STARTED")
+    try:
+        start_time = batch_time if batch_time else time.time()
+        if "Document" == msg_type:
             try:
-                start_time = batch_time if batch_time else time.time()
-                if "Document" == msg_type:
-                    try:
-                        ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
-                    except:
-                        ph_path = None
-                    await client.send_document(
-                        chat, file, thumb=ph_path, caption=caption, 
-                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                    )
-                    if ph_path: os.remove(ph_path)
+                ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
+            except:
+                ph_path = None
+            await client.send_document(
+                chat, file, thumb=ph_path, caption=caption, 
+                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+            )
+            if ph_path: os.remove(ph_path)
 
-                elif "Video" == msg_type:
-                    try:
-                        ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
-                    except:
-                        ph_path = None   
-                    await client.send_video(
-                        chat, file, duration=msg.video.duration, width=msg.video.width, 
-                        height=msg.video.height, thumb=ph_path, caption=caption, 
-                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                    )
-                    if ph_path: os.remove(ph_path)
+        elif "Video" == msg_type:
+            try:
+                ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
+            except:
+                ph_path = None   
+            await client.send_video(
+                chat, file, duration=msg.video.duration, width=msg.video.width, 
+                height=msg.video.height, thumb=ph_path, caption=caption, 
+                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+            )
+            if ph_path: os.remove(ph_path)
 
-                elif "Audio" == msg_type:
-                    try:
-                        ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
-                    except:
-                        ph_path = None
-                    await client.send_audio(
-                        chat, file, thumb=ph_path, caption=caption, 
-                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                    )
-                    if ph_path: os.remove(ph_path)
+        elif "Audio" == msg_type:
+            try:
+                ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
+            except:
+                ph_path = None
+            await client.send_audio(
+                chat, file, thumb=ph_path, caption=caption, 
+                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+            )
+            if ph_path: os.remove(ph_path)
 
-                elif "Animation" == msg_type:
-                    await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+        elif "Animation" == msg_type:
+            await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
-                elif "Sticker" == msg_type:
-                    await client.send_sticker(chat, file, reply_to_message_id=message.id)
+        elif "Sticker" == msg_type:
+            await client.send_sticker(chat, file, reply_to_message_id=message.id)
 
-                elif "Voice" == msg_type:
-                    await client.send_voice(
-                        chat, file, caption=caption, 
-                        reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                        progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                    )
+        elif "Voice" == msg_type:
+            await client.send_voice(
+                chat, file, caption=caption, 
+                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
+            )
 
-                elif "Photo" == msg_type:
-                    await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+        elif "Photo" == msg_type:
+            await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
-            except Exception as e:
-                if str(e) == "STOP_TRANSMISSION":
-                    await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
-                elif ERROR_MESSAGE:
-                    await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
-
-    else:
-        try:
-            start_time = batch_time if batch_time else time.time()
-            if "Document" == msg_type:
-                try:
-                    ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
-                except:
-                    ph_path = None
-                await client.send_document(
-                    chat, file, thumb=ph_path, caption=caption, 
-                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                )
-                if ph_path: os.remove(ph_path)
-
-            elif "Video" == msg_type:
-                try:
-                    ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
-                except:
-                    ph_path = None   
-                await client.send_video(
-                    chat, file, duration=msg.video.duration, width=msg.video.width, 
-                    height=msg.video.height, thumb=ph_path, caption=caption, 
-                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                )
-                if ph_path: os.remove(ph_path)
-
-            elif "Audio" == msg_type:
-                try:
-                    ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
-                except:
-                    ph_path = None
-                await client.send_audio(
-                    chat, file, thumb=ph_path, caption=caption, 
-                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                )
-                if ph_path: os.remove(ph_path)
-
-            elif "Animation" == msg_type:
-                await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-
-            elif "Sticker" == msg_type:
-                await client.send_sticker(chat, file, reply_to_message_id=message.id)
-
-            elif "Voice" == msg_type:
-                await client.send_voice(
-                    chat, file, caption=caption, 
-                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                    progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
-                )
-
-            elif "Photo" == msg_type:
-                await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
-
-        except Exception as e:
-            if str(e) == "STOP_TRANSMISSION":
-                await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
-            elif ERROR_MESSAGE:
-                await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
-
-
+    except Exception as e:
+        if str(e) == "STOP_TRANSMISSION":
+            await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
+        elif ERROR_MESSAGE:
+            await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
 
     # --- Final Cleanup Section ---
-    if file:  # ✅ Check if file is not None
-        if os.path.exists(f'{message.id}upstatus.txt'): 
-            os.remove(f'{message.id}upstatus.txt')
+    if os.path.exists(f'{message.id}upstatus.txt'): 
+        os.remove(f'{message.id}upstatus.txt')
 
-        if os.path.exists(file):
-            os.remove(file)
+    if os.path.exists(file):
+        os.remove(file) # Protects your 26GB storage
 
-    try:
-        await client.delete_messages(user_chat, [smsg.id])
-    except:
-        pass
-
-    return file   
+    await client.delete_messages(user_chat, [smsg.id])
 
 
 # get the type of message
