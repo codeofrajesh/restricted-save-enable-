@@ -606,10 +606,10 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
         if data is None: # Shutdown signal
             break
         
-        file_path, file_num, start_time = data
+        file_path, file_num, start_time, chat_id, msg_id = data
         try:
             # We call handle_private with 'upload_only_file' to skip download phase
-            await handle_private(client, acc, message, None, None, start_time, file_num, upload_only_file=file_path)
+            await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
             
             # Update the batch status message after each successful upload
             await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
@@ -668,10 +668,10 @@ async def run_batch(client, acc, message, start_link, count):
                     # 6. FEED THE UPLOAD LANE
                     if parallel_on:
                         # Parallel: Put in queue and immediately start next download cooldown
-                        await upload_queue.put((file_path, file_num, time.time()))
+                        await upload_queue.put((file_path, file_num, time.time(), chat_id, current_msg_id))
                     else:
                         # Sequential: Put in queue and wait for it to be processed
-                        await upload_queue.put((file_path, file_num, time.time()))
+                        await upload_queue.put((file_path, file_num, time.time(), chat_id, current_msg_id))
                         await upload_queue.join() 
                 
             except Exception as e:
@@ -769,10 +769,11 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     log_chat = int(CHANNEL_ID) if CHANNEL_ID else None
     if upload_only_file:
         file = upload_only_file
-        # Move directly to the upload phase by skipping the download code
         goto_upload = True 
+        msg: Message = await acc.get_messages(chatid, msgid)
     else:
         goto_upload = False
+        msg: Message = await acc.get_messages(chatid, msgid)
 
     # Check for Customized Upload preference
     custom_destination = await db.get_custom_upload(user_id)
