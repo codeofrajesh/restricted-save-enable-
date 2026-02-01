@@ -15,7 +15,7 @@ class batch_temp(object):
     IS_BATCH = {}
 
 # download status
-async def downstatus(client, statusfile, message, chat):
+async def downstatus(client, statusfile, message, chat, file_num):
     while True:
         if os.path.exists(statusfile): break
         await asyncio.sleep(3)
@@ -24,14 +24,14 @@ async def downstatus(client, statusfile, message, chat):
             txt = f.read()
         try:
             # Added a header for the Download phase
-            await client.edit_message_text(chat, message.id, f"📥 **Downloading Content...**\n\n{txt}")
+            await client.edit_message_text(chat, message.id, f"📥 **Downloading File No {file_num}...**\n\n{txt}")
             await asyncio.sleep(10) # Throttle to avoid FloodWait
         except:
             await asyncio.sleep(5)
 
 
 # upload status
-async def upstatus(client, statusfile, message, chat):
+async def upstatus(client, statusfile, message, chat, file_num):
     while True:
         if os.path.exists(statusfile): break
         await asyncio.sleep(3)      
@@ -40,7 +40,7 @@ async def upstatus(client, statusfile, message, chat):
             txt = f.read()
         try:
             # Added a header for the Upload phase
-            await client.edit_message_text(chat, message.id, f"📤 **Uploading Content...**\n\n{txt}")
+            await client.edit_message_text(chat, message.id, f"📤 **Uploading File No {file_num}...**\n\n{txt}")
             await asyncio.sleep(10)
         except:
             await asyncio.sleep(5)
@@ -803,7 +803,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 return 
 
         smsg = await client.send_message(user_chat, '📥 **Preparing Download...**', reply_to_message_id=message.id)
-        asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, chat))
+        asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, user_chat, file_num))
 
         try:
             start_time = batch_time if batch_time else time.time()
@@ -833,7 +833,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     if goto_upload:
         smsg = await client.send_message(user_chat, '📤 **Preparing Upload...**', reply_to_message_id=message.id) 
-    asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, chat))
+    asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, user_chat, file_num))
 
     user_custom = await db.get_custom_caption(user_id)
     original_caption = msg.caption if msg.caption else ""
