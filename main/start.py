@@ -722,7 +722,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
     tmp = "📊 **Calculating Speed and ETA...**"
 
     # Update every 10 seconds to stay within Telegram limits
-    if round(diff % 10.00) == 0 or current == total:
+    if round(diff % 15.00) == 0 or current == total:
         percentage = current * 100 / total
         
         # 1. Speed Calculation
@@ -752,8 +752,12 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         try:
             with open(f'{message.id}{type}status.txt', "w") as fileup:
                 fileup.write(tmp)
+            # FORCE a final update at 100%
+            if current == total:
+                await asyncio.sleep(1) 
         except Exception as e:
             print(f"File Write Error: {e}")
+            pass
 
 
 # handle private
@@ -810,6 +814,11 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             )
             if os.path.exists(f'{message.id}downstatus.txt'):
                 os.remove(f'{message.id}downstatus.txt')
+            try:
+                await smsg.edit(f"✅ **Download No {file_num} Finished!**\n📦 **Track 1:** Station clear.\n🚀 **Track 2:** Handing over to Upload Lane...")
+            except:
+                pass
+
             if download_only:
                 return file    
         except Exception as e:
