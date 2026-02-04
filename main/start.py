@@ -752,15 +752,15 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         )
         
         try:
-            with open(f'{message.id}{type}status.txt', "w") as fileup:
-                fileup.write(tmp)
-            # FORCE a final update at 100%
+            status_file = f'{message.id}{type}status.txt'
+            if os.path.exists(status_file):
+                with open(status_file, "w") as fileup:
+                    fileup.write(tmp)
+            
             if current == total:
                 await asyncio.sleep(1) 
-        except Exception as e:
-            print(f"File Write Error: {e}")
+        except Exception:
             pass
-
 
 # handle private
 async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_only=False, upload_only_file=None):
