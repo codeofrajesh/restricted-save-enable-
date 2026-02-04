@@ -601,6 +601,7 @@ async def save(client: Client, message: Message):
 #upload worker 
 async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count):
     """The Upload Lane: Processes files one by one in FIFO order"""
+    user_id = message.from_user.id
     while True:
         data = await upload_queue.get()
         if data is None: # Shutdown signal
@@ -611,8 +612,9 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
             # We call handle_private with 'upload_only_file' to skip download phase
             await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
             
-            # Update the batch status message after each successful upload
-            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+            current_status = await db.get_status(user_id)
+            if current_status == "processing_batch":
+                await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
         except Exception as e:
             print(f"Upload Track Error on File {file_num}: {e}")
         finally:
@@ -686,7 +688,11 @@ async def run_batch(client, acc, message, start_link, count):
         # 8. SIGNAL WORKER TO SHUTDOWN AFTER ALL FILES QUEUED
         await upload_queue.put(None) 
         await uploader
-        await stats_msg.reply("✅ **Batch Processing Complete!**")
+        final_status = await db.get_status(user_id)
+        if final_status == "cancelled":
+             await stats_msg.reply("🛑 **Batch Cancelled successfully.**")
+        else:
+             await stats_msg.reply("✅ **Batch Processing Complete!**")
 
     finally:
         # 9. CLEAN UP STATE AND SESSION
@@ -750,8 +756,9 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         )
         
         try:
-            with open(f'{message.id}{type}status.txt', "w") as fileup:
-                fileup.write(tmp)
+            if os.path.exists(f'{message.id}{type}status.txt'):
+                with open(f'{message.id}{type}status.txt', "w") as fileup:
+                    fileup.write(tmp)
             # FORCE a final update at 100%
             if current == total:
                 await asyncio.sleep(1) 
