@@ -601,7 +601,6 @@ async def save(client: Client, message: Message):
 #upload worker 
 async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count):
     """The Upload Lane: Processes files one by one in FIFO order"""
-    user_id = message.from_user.id
     while True:
         data = await upload_queue.get()
         if data is None: # Shutdown signal
@@ -612,9 +611,8 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
             # We call handle_private with 'upload_only_file' to skip download phase
             await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
             
-            current_status = await db.get_status(user_id)
-            if current_status == "processing_batch":
-                await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+            # Update the batch status message after each successful upload
+            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
         except Exception as e:
             print(f"Upload Track Error on File {file_num}: {e}")
         finally:
@@ -688,11 +686,7 @@ async def run_batch(client, acc, message, start_link, count):
         # 8. SIGNAL WORKER TO SHUTDOWN AFTER ALL FILES QUEUED
         await upload_queue.put(None) 
         await uploader
-        final_status = await db.get_status(user_id)
-        if final_status == "cancelled":
-             await stats_msg.reply("🛑 **Batch Cancelled successfully.**")
-        else:
-             await stats_msg.reply("✅ **Batch Processing Complete!**")
+        await stats_msg.reply("✅ **Batch Processing Complete!**")
 
     finally:
         # 9. CLEAN UP STATE AND SESSION
@@ -756,9 +750,8 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         )
         
         try:
-            if os.path.exists(f'{message.id}{type}status.txt'):
-                with open(f'{message.id}{type}status.txt', "w") as fileup:
-                    fileup.write(tmp)
+            with open(f'{message.id}{type}status.txt', "w") as fileup:
+                fileup.write(tmp)
             # FORCE a final update at 100%
             if current == total:
                 await asyncio.sleep(1) 
@@ -810,17 +803,17 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 return 
 
         smsg = await client.send_message(user_chat, '📥 **Preparing Download...**', reply_to_message_id=message.id)
-        asyncio.create_task(downstatus(client, f'{smsg.id}downstatus.txt', smsg, user_chat, file_num))
+        asyncio.create_task(downstatus(client, f'{message.id}downstatus.txt', smsg, user_chat, file_num))
 
         try:
             start_time = batch_time if batch_time else time.time()
             file = await acc.download_media(
                 msg, 
                 progress=progress, 
-                progress_args=[smsg, "down", user_id, db, start_time, file_num]
+                progress_args=[message, "down", user_id, db, start_time, file_num]
             )
-            if os.path.exists(f'{smsg.id}downstatus.txt'):
-                os.remove(f'{smsg.id}downstatus.txt')
+            if os.path.exists(f'{message.id}downstatus.txt'):
+                os.remove(f'{message.id}downstatus.txt')
             try:
                 await smsg.edit(f"✅ **Download No {file_num} Finished!**\n📦 **Track 1:** Station clear.\n🚀 **Track 2:** Handing over to Upload Lane...")
             except:
@@ -834,13 +827,13 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 return
             elif ERROR_MESSAGE:
                 await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id) 
-            if os.path.exists(f'{smsg.id}downstatus.txt'):
-                os.remove(f'{smsg.id}downstatus.txt')
+            if os.path.exists(f'{message.id}downstatus.txt'):
+                os.remove(f'{message.id}downstatus.txt')
             return await smsg.delete()
 
     if goto_upload:
         smsg = await client.send_message(user_chat, '📤 **Preparing Upload...**', reply_to_message_id=message.id) 
-    asyncio.create_task(upstatus(client, f'{smsg.id}upstatus.txt', smsg, user_chat, file_num))
+    asyncio.create_task(upstatus(client, f'{message.id}upstatus.txt', smsg, user_chat, file_num))
 
     user_custom = await db.get_custom_caption(user_id)
     original_caption = msg.caption if msg.caption else ""
@@ -860,7 +853,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_document(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[smsg, "up", user_id, db, start_time, file_num]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -873,7 +866,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 chat, file, duration=msg.video.duration, width=msg.video.width, 
                 height=msg.video.height, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[smsg, "up", user_id, db, start_time, file_num]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -885,7 +878,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_audio(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[smsg, "up", user_id, db, start_time, file_num]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
             if ph_path: os.remove(ph_path)
 
@@ -899,7 +892,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_voice(
                 chat, file, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[smsg, "up", user_id, db, start_time, file_num]
+                progress=progress, progress_args=[message, "up", user_id, db, start_time, file_num]
             )
 
         elif "Photo" == msg_type:
@@ -912,8 +905,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
 
     # --- Final Cleanup Section ---
-    if os.path.exists(f'{smsg.id}upstatus.txt'): 
-        os.remove(f'{smsg.id}upstatus.txt')
+    if os.path.exists(f'{message.id}upstatus.txt'): 
+        os.remove(f'{message.id}upstatus.txt')
 
     if os.path.exists(file):
         os.remove(file) # Protects your 26GB storage
