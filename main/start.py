@@ -751,15 +751,14 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
             f"⌛️ **Elapsed •** {elapsed}"
         )
         
+        status_file = f'{message.id}{type}status.txt'
+        
         try:
-            status_file = f'{message.id}{type}status.txt'
-            if os.path.exists(status_file):
-                with open(status_file, "w") as fileup:
-                    fileup.write(tmp)
-            
+            with open(status_file, "w+", encoding='utf-8') as fileup:
+                fileup.write(tmp)
             if current == total:
-                await asyncio.sleep(1) 
-        except Exception:
+                await asyncio.sleep(1)
+        except (AttributeError, TypeError, OSError):
             pass
 
 # handle private
