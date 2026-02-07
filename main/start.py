@@ -600,7 +600,7 @@ async def save(client: Client, message: Message):
 
 #upload worker 
 async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count):
-    """The Upload Lane: Processes files one by one in FIFO order"""
+    user_id = message.from_user.id
     while True:
         data = await upload_queue.get()
         if data is None: # Shutdown signal
@@ -616,7 +616,7 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
         except Exception as e:
             print(f"Upload Track Error on File {file_num}: {e}")
         finally:
-            upload_queue.task_done() # Clears the slot for the next file
+            upload_queue.task_done()
             
 
 # run batch helper function
