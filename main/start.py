@@ -605,13 +605,18 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
         data = await upload_queue.get()
         if data is None: # Shutdown signal
             break
+
+        status = await db.get_status(user_id)
+        if status == "cancelled":
+            upload_queue.task_done()
+            continue # Skip this file
         
         file_path, file_num, start_time, chat_id, msg_id = data
         try:
             await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
             
-            current_status = await db.get_status(user_id)
-            if current_status == "processing_batch":
+            new_status = await db.get_status(user_id)
+            if new_status == "processing_batch":
                 await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
         except Exception as e:
             print(f"Upload Track Error on File {file_num}: {e}")
@@ -755,10 +760,13 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         
         try:
             if message and hasattr(message, 'id'):
-                with open(status_file, "w+", encoding='utf-8') as fileup:
-                    fileup.write(tmp)
-                if current == total:
-                    await asyncio.sleep(1)
+                return
+            
+            status_file = f'{message.id}{type}status.txt'
+            with open(status_file, "w+", encoding='utf-8') as fileup:
+                fileup.write(tmp)
+            if current == total:
+                await asyncio.sleep(1)
         except (AttributeError, TypeError, OSError):
             pass
 
