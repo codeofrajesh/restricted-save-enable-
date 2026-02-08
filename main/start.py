@@ -754,10 +754,11 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         status_file = f'{message.id}{type}status.txt'
         
         try:
-            with open(status_file, "w+", encoding='utf-8') as fileup:
-                fileup.write(tmp)
-            if current == total:
-                await asyncio.sleep(1)
+            if message and hasattr(message, 'id'):
+                with open(status_file, "w+", encoding='utf-8') as fileup:
+                    fileup.write(tmp)
+                if current == total:
+                    await asyncio.sleep(1)
         except (AttributeError, TypeError, OSError):
             pass
 
@@ -815,6 +816,13 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             )
             if os.path.exists(f'{message.id}downstatus.txt'):
                 os.remove(f'{message.id}downstatus.txt')
+
+            check_status = await db.get_status(user_id)
+            if check_status == "cancelled":
+                if os.path.exists(file): os.remove(file)
+                await smsg.edit("🛑 **Download Halted. Process Terminated.**")
+                return    
+            
             try:
                 await smsg.edit(f"✅ **Download No {file_num} Finished!**\n📦 **Track 1:** Station clear.\n🚀 **Track 2:** Handing over to Upload Lane...")
             except:
@@ -831,6 +839,11 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             if os.path.exists(f'{message.id}downstatus.txt'):
                 os.remove(f'{message.id}downstatus.txt')
             return await smsg.delete()
+        
+    check_status = await db.get_status(user_id)
+    if check_status == "cancelled":
+        if 'file' in locals() and os.path.exists(file): os.remove(file)
+        return    
 
     if goto_upload:
         smsg = await client.send_message(user_chat, '📤 **Preparing Upload...**', reply_to_message_id=message.id) 
@@ -845,6 +858,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     # --- Unified Upload Logic with Kill Switch ---
     try:
+        if await db.get_status(user_id) == "cancelled":
+             raise Exception("STOP_TRANSMISSION")
         start_time = batch_time if batch_time else time.time()
         if "Document" == msg_type:
             try:
