@@ -783,7 +783,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
                     fileup.write(tmp)
                 if current == total:
                     await asyncio.sleep(1)
-        except (AttributeError, TypeError, OSError):
+        except (AttributeError, TypeError, OSError, FileNotFoundError):
             pass
 
 # handle private
