@@ -741,6 +741,7 @@ def get_readable_time(seconds: int) -> str:
 async def progress(current, total, message, type, user_id, db, start_time, file_num):
     status = await db.get_status(user_id)
     if status is not None and status not in ["processing_batch", "processing_single"]:
+        print(f"DEBUG [Exit]: STOP_TRANSMISSION triggered for File {file_num}")
         raise Exception("STOP_TRANSMISSION")
     
     now = time.time()
@@ -778,18 +779,15 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         status_file = f'{message.id}{type}.txt'
         
         try:
-            if message and hasattr(message, 'id'):
-                with open(status_file, "w+", encoding='utf-8') as fileup:
-                    # LOG 1: Check if the file handle is healthy
-                    if fileup is None:
-                        print(f"DEBUG [File]: File handle is None for {status_file}")
+        # Use a local variable for ID to prevent NoneType during the 'raise' period
+            msg_id = getattr(message, 'id', None)
+            if msg_id:
+                status_file = f'{msg_id}{type}.txt'
+                with open(status_file, "w", encoding='utf-8') as fileup:
                     fileup.write(tmp)
-            else:
-                # LOG 2: Check if message itself is the NoneType culprit
-                print(f"DEBUG [NoneType]: Message object is {type(message)}")
-                
-            if current == total:
-                await asyncio.sleep(1)
+                    
+                if current == total:
+                    await asyncio.sleep(1)
         except AttributeError as e:
             print(f"DEBUG [AttributeError]: {e} | Type: {type(message)}")
             pass
