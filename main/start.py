@@ -775,7 +775,7 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
             f"⌛️ **Elapsed •** {elapsed}"
         )
         
-        status_file = f'{message.id}{type}status.txt'
+        status_file = f'{message.id}{type}.txt'
         
         try:
             if message and hasattr(message, 'id'):
@@ -860,8 +860,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 return
             elif ERROR_MESSAGE:
                 await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id) 
-            if os.path.exists(f'{message.id}downstatus.txt'):
-                os.remove(f'{message.id}downstatus.txt')
+            if os.path.exists(f'{message.id}_{file_num}_down.txt'):
+                os.remove(f'{message.id}_{file_num}_down.txt')
             return await smsg.delete()
         
     check_status = await db.get_status(user_id)
