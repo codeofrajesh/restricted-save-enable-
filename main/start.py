@@ -780,12 +780,23 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         try:
             if message and hasattr(message, 'id'):
                 with open(status_file, "w+", encoding='utf-8') as fileup:
+                    # LOG 1: Check if the file handle is healthy
+                    if fileup is None:
+                        print(f"DEBUG [File]: File handle is None for {status_file}")
                     fileup.write(tmp)
-                if current == total:
-                    await asyncio.sleep(1)
-        except (AttributeError, TypeError, OSError, FileNotFoundError):
+            else:
+                # LOG 2: Check if message itself is the NoneType culprit
+                print(f"DEBUG [NoneType]: Message object is {type(message)}")
+                
+            if current == total:
+                await asyncio.sleep(1)
+        except AttributeError as e:
+            print(f"DEBUG [AttributeError]: {e} | Type: {type(message)}")
             pass
-
+        except Exception as e:
+            print(f"DEBUG [General]: {e}")
+            pass
+        
 # handle private
 async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_only=False, upload_only_file=None):
     msg: Message = await acc.get_messages(chatid, msgid)
@@ -945,11 +956,16 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
 
     # --- Final Cleanup Section ---
-    if os.path.exists(f'{message.id}_{file_num}_up.txt'): 
-        os.remove(f'{message.id}_{file_num}_up.txt')
+    status_path = f'{message.id}_{file_num}_up.txt'
+    if os.path.exists(status_path): 
+        print(f"DEBUG [Cleanup]: Deleting status file {status_path}")
+        os.remove(status_path)
+    else:
+        print(f"DEBUG [Cleanup]: Status file {status_path} was ALREADY GONE.")
 
     if os.path.exists(file):
-        os.remove(file) # Protects your 26GB storage
+        print(f"DEBUG [Cleanup]: Deleting media file {file}")
+        os.remove(file)) # Protects your 26GB storage
 
     await client.delete_messages(user_chat, [smsg.id])
 
