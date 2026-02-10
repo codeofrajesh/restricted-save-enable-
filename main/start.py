@@ -20,15 +20,24 @@ async def downstatus(client, statusfile, message, chat, file_num):
         if os.path.exists(statusfile): break
         await asyncio.sleep(3)
     while os.path.exists(statusfile):
-        with open(statusfile, "r") as f:
-            txt = f.read()
         try:
-            # Added a header for the Download phase
-            await client.edit_message_text(chat, message.id, f"📥 **Downloading File No {file_num}...**\n\n{txt}")
-            await asyncio.sleep(10) # Throttle to avoid FloodWait
-        except:
+            if not os.path.exists(statusfile):  # ✅ Double check
+                break
+            
+            with open(statusfile, "r") as f:
+                txt = f.read()
+            
+            if os.path.exists(statusfile):  # ✅ Check before using
+                try:
+                    await client.edit_message_text(chat, message.id, f"📥 **Downloading File No {file_num}...**\n\n{txt}")
+                except:
+                    pass
+            
+            await asyncio.sleep(10)
+        except FileNotFoundError:  # ✅ Gracefully exit
+            break    
+        except Exception:
             await asyncio.sleep(5)
-
 
 # upload status
 async def upstatus(client, statusfile, message, chat, file_num):
@@ -692,7 +701,7 @@ async def run_batch(client, acc, message, start_link, count):
         await uploader
         final_status = await db.get_status(user_id)
         if final_status == "cancelled":
-             await stats_msg.reply("🛑 **Batch Cancelled and Tracks Cleared.**")
+             await stats_msg.reply("🛑 **Batch Cancelled !!.**")
         else:
              await stats_msg.reply("✅ **Batch Processing Complete!**")
     finally:
@@ -760,13 +769,10 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
         
         try:
             if message and hasattr(message, 'id'):
-                return
-            
-            status_file = f'{message.id}{type}status.txt'
-            with open(status_file, "w+", encoding='utf-8') as fileup:
-                fileup.write(tmp)
-            if current == total:
-                await asyncio.sleep(1)
+                with open(status_file, "w+", encoding='utf-8') as fileup:
+                    fileup.write(tmp)
+                if current == total:
+                    await asyncio.sleep(1)
         except (AttributeError, TypeError, OSError):
             pass
 
