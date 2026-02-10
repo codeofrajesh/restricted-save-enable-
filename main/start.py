@@ -965,7 +965,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
 
     if os.path.exists(file):
         print(f"DEBUG [Cleanup]: Deleting media file {file}")
-        os.remove(file)) # Protects your 26GB storage
+        os.remove(file)# Protects your 26GB storage
 
     await client.delete_messages(user_chat, [smsg.id])
 
