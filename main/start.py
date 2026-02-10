@@ -42,16 +42,26 @@ async def downstatus(client, statusfile, message, chat, file_num):
 # upload status
 async def upstatus(client, statusfile, message, chat, file_num):
     while True:
-        if os.path.exists(statusfile): break
+        if os.path.exists(statusfile): 
+            break
         await asyncio.sleep(3)      
     while os.path.exists(statusfile):
-        with open(statusfile, "r") as f:
-            txt = f.read()
         try:
-            # Added a header for the Upload phase
-            await client.edit_message_text(chat, message.id, f"📤 **Uploading File No {file_num}...**\n\n{txt}")
+            if not os.path.exists(statusfile):  # ✅ Check first
+                break
+            
+            with open(statusfile, "r") as f:
+                txt = f.read()
+            
+            try:
+                await client.edit_message_text(chat, message.id, f"📤 **Uploading File No {file_num}...**\n\n{txt}")
+            except:
+                pass
+            
             await asyncio.sleep(10)
-        except:
+        except FileNotFoundError:  # ✅ Handle gracefully
+            break
+        except Exception:
             await asyncio.sleep(5)
 
 
