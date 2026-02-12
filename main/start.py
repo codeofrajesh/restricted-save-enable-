@@ -519,7 +519,7 @@ async def send_cancel(client, message):
     return	
 	
 # The Catcher function
-@Client.on_message(filters.text & filters.private, group=-1)
+@Client.on_message((filters.text | filters.photo) & filters.private, group=-1)
 async def handle_user_states(client, message):
     user_id = message.from_user.id
     status = await db.get_status(user_id)
