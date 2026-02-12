@@ -1343,13 +1343,13 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                     ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
                 except:
                     ph_path = None   
-                sent_msg = await client.send_video(
-                    chat, file, duration=msg.video.duration, width=target_width if 'target_width' in locals() else msg.video.width,
-                height=target_height if 'target_height' in locals() else msg.video.height, thumb=ph_path, caption=caption, 
-                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                    progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
-                )
-                if ph_path: os.remove(ph_path)
+            sent_msg = await client.send_video(
+                chat, file, duration=msg.video.duration, width=target_width if 'target_width' in locals() else msg.video.width,
+            height=target_height if 'target_height' in locals() else msg.video.height, thumb=ph_path, caption=caption, 
+                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
+            )
+            if ph_path: os.remove(ph_path)
 
         elif "Audio" == msg_type:
             try:
