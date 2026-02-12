@@ -638,7 +638,8 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
             if new_status == "processing_batch":
                 await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
         except Exception as e:
-            print(f"Upload Track Error on File {file_num}: {e}")
+            if "STOP_TRANSMISSION" in str(e):
+                return
         finally:
             upload_queue.task_done()
             
