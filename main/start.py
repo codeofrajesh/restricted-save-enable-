@@ -335,19 +335,43 @@ async def list_users_handler(client, message):
     msg = await message.reply("🔄 **Sorting Database... Please Wait.**")
     
     # 1. Fetch all raw data
-    all_users = await db.get_all_users_list()
+    all_users_cursor = await db.get_all_users_list()
     premium_ids = await db.get_premium_user_ids()
     
-    # 2. Filter the lists
+    # Debug print to console (optional, helps verify IDs)
+    print(f"DEBUG: Found {len(premium_ids)} premium IDs: {premium_ids}")
+
+    # 2. Create a "Lookup Table" prioritizing the TELEGRAM ID
+    user_map = {}
+    for user in all_users_cursor:
+        # 🛑 CRITICAL FIX: Look for 'id' first!
+        # Only use '_id' if 'id' is missing.
+        uid = user.get('id') 
+        if uid is None:
+            uid = user.get('_id')
+            
+        # Store user in map with the CLEAN ID as the key
+        if uid:
+            user_map[uid] = user
+
     premium_list = []
     free_list = []
-    
-    for user in all_users:
-        uid = user.get('_id', user.get('id'))
-        if uid in premium_ids:
-            premium_list.append(user)
+
+    # 3. BUILD PREMIUM LIST (The Intersection)
+    for pid in premium_ids:
+        if pid in user_map:
+            # User is in both lists -> Add to Premium View
+            premium_list.append(user_map[pid])
         else:
+            # User is Premium but hasn't started bot -> Add Placeholder
+            premium_list.append({'id': pid, 'name': '⚠️ Unknown (Manually Added)', 'username': None})
+
+    # 4. BUILD FREE LIST (The Remainder)
+    for uid, user in user_map.items():
+        if uid not in premium_ids:
             free_list.append(user)
+            
+    # 5. Determine which list to show
     command = message.command[0]
     if command == "listpremium":
         final_list = premium_list
@@ -358,12 +382,14 @@ async def list_users_handler(client, message):
         
     if not final_list:
         return await msg.edit(f"📂 **{title} is empty.**")
+
+    # 6. Output Generation
     output_text = format_user_list(final_list, title)
     
     if len(output_text) > 4000:
         filename = f"{command}.txt"
         with open(filename, "w", encoding="utf-8") as f:
-            f.write(output_text.replace("**", "").replace("`", "")) 
+            f.write(output_text.replace("**", "").replace("`", ""))
         
         await msg.delete()
         await message.reply_document(
@@ -371,7 +397,7 @@ async def list_users_handler(client, message):
             caption=f"📂 **{title}**\n\n⚠️ List too long for text message. Sending file.",
             file_name=filename
         )
-        os.remove(filename) 
+        os.remove(filename)
     else:
         await msg.edit(output_text)       
 
