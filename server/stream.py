@@ -5,10 +5,10 @@ from telethon import TelegramClient
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 from telethon.tl.functions.messages import GetMessagesRequest
 import uvicorn
+from bot import RazzeshUser as client
 
 app = FastAPI()
 # This will be your STRING_SESSION client
-client: TelegramClient = None 
 
 PLAYER_TEMPLATE = """
 <!DOCTYPE html>
