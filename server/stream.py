@@ -16,8 +16,8 @@ PLAYER_TEMPLATE = """
 <head>
     <title>Cinema Mode</title>
     <style>
-        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        video { width: 100%; max-width: 1000px; max-height: 100vh; outline: none; }
+        body {{ margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }}
+        video {{ width: 100%; max-width: 1000px; max-height: 100vh; outline: none; }}
     </style>
 </head>
 <body>
