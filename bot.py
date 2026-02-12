@@ -1,4 +1,7 @@
 import logging
+import uvicorn
+from threading import Thread
+from server.stream import app, client as server_client
 logging.basicConfig(level=logging.INFO)
 from pyrogram import Client
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION, LOGIN_SYSTEM
@@ -35,6 +38,28 @@ class Bot(Client):
 
 if __name__ == "__main__":
     bot = Bot()
+
+    # --- 🎬 CINEMA MODE SERVER STARTUP ---
+    # We import the module here to inject the client
+    import server.stream 
+    
+    # Logic: If you provided a String Session (Owner Account), use it.
+    # If not, use the Bot itself (limited to public/bot chats).
+    if RazzeshUser is not None:
+         server.stream.client = RazzeshUser
+    else:
+         server.stream.client = bot
+         
+    # Define the server starter
+    def start_web_server():
+        # Host 0.0.0.0 makes it accessible via your VPS Public IP
+        uvicorn.run(server.stream.app, host="0.0.0.0", port=8000)
+        
+    # Run Uvicorn in a background thread so it doesn't block the bot
+    Thread(target=start_web_server, daemon=True).start()
+    print("✅ Cinema Server Running on Port 8000")
+    # -------------------------------------
+
     bot.run()
 
 #t.me/razzeshhere

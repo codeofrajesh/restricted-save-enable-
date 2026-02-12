@@ -97,7 +97,50 @@ async def send_start(client: Client, message: Message):
         reply_to_message_id=message.id
     )
     return
-	
+
+#stream command
+@Client.on_message(filters.command("stream") & filters.private)
+async def cinema_mode(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Usage:** `/stream [Link]`")
+        
+    link = message.command[1]
+    
+    try:
+        # --- 1. PARSE THE LINK ---
+        if "https://t.me/c/" in link:
+            # Private Link format: https://t.me/c/123456789/101
+            # We need to add "-100" to the chat ID part
+            datas = link.split("/")
+            chat_id = int("-100" + datas[4])
+            msg_id = int(datas[5].split("?")[0]) # Handle ?single if present
+            
+        elif "https://t.me/" in link:
+            # Public Link format: https://t.me/channelname/101
+            datas = link.split("/")
+            chat_id = datas[3] # Username remains a string for public chats
+            msg_id = int(datas[4].split("?")[0])
+        else:
+            return await message.reply("❌ **Invalid Telegram Link.**")
+
+        # --- 2. GENERATE STREAM LINK ---
+        # ⚠️ IMPORTANT: Replace 127.0.0.1 with your VPS Public IP if deploying!
+        # If running locally for testing, 127.0.0.1 is fine.
+        host = "http://16.171.168.163:8000" 
+        
+        watch_link = f"{host}/watch/{chat_id}/{msg_id}"
+        
+        await message.reply(
+            "🎬 **Cinema Mode Ready**\n\n"
+            f"Click to watch instantly (No Download needed):\n"
+            f"🔗 [Open Player]({watch_link})",
+            disable_web_page_preview=True
+        )
+        
+    except Exception as e:
+        await message.reply(f"⚠️ **Error parsing link:** {e}")
+
+
 #settings command
 @Client.on_callback_query(filters.regex("settings_home"))
 async def settings_menu(client, callback_query):
