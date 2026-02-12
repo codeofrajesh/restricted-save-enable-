@@ -107,43 +107,25 @@ async def player(chat_id: int, msg_id: int):
 
 @app.get("/stream/{chat_id}/{msg_id}")
 async def stream_video(request: Request, chat_id: Union[int, str], msg_id: int):
-    # 1. Warm-up: Resolve the Peer
-    # This forces Pyrogram to 'learn' the channel before fetching the message
-    try:
-        # Convert string chat_id back to int if it's private
-        if isinstance(chat_id, str) and chat_id.startswith("-100"):
-            chat_id = int(chat_id)
-            
-        try:
-            await client.get_chat(chat_id) 
-        except Exception:
-            # ACCESS PROXY: If get_chat fails, we scan recent dialogs 
-            # to force the session to "see" and cache the channel peer.
-            logging.info(f"🔄 Peer not found. Running Access Proxy for {chat_id}...")
-            async for dialog in client.get_dialogs(limit=30):
-                if dialog.chat.id == chat_id:
-                    logging.info(f"✅ Found and cached peer: {dialog.chat.title}")
-                    break
-    except Exception as e:
-        logging.error(f"Failed to resolve chat {chat_id}: {e}")
-        # If we can't find the chat, we can't stream
-        return Response("Chat not found or inaccessible", status_code=404)
+    # Ensure ID is an integer for private channels
+    if isinstance(chat_id, str) and chat_id.startswith("-100"):
+        chat_id = int(chat_id)
 
-    # 2. Get Metadata
     try:
+        # Step 1: Just get the message directly. 
+        # Since we injected 'RazzeshUser', the client now has admin permissions.
         msg = await client.get_messages(chat_id, msg_id)
+        
         if not msg or not msg.video:
-            return Response("Video not found", status_code=404)
+            return Response("Video not found or inaccessible", status_code=404)
         
+        # Step 2: Stream the bytes
         file_size = msg.video.file_size
-        
-        # 3. Initialize Streamer
         stream = TGFileStream(client, chat_id, msg_id, file_size)
-        
-        # 4. Hand over to Range Handler
         return await range_streamer(request, stream, file_size)
+
     except Exception as e:
-        logging.error(f"Streaming error: {e}")
+        logging.error(f"🎬 Cinema Error: {e}")
         return Response(f"Internal Error: {e}", status_code=500)
     
 async def get_file_offset(self, chat_id, message_id, offset, limit):
