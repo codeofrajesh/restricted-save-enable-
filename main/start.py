@@ -100,6 +100,9 @@ async def send_start(client: Client, message: Message):
 #settings command
 @Client.on_callback_query(filters.regex("settings_home"))
 async def settings_menu(client, callback_query):
+    user_id = callback_query.from_user.id
+    idx_status = await db.get_batch_index_status(user_id)
+    idx_text = "✅ On" if idx_status else "❌ Off"
     buttons = [[
         InlineKeyboardButton("📝 Set Custom Caption", callback_data="set_caption_action")
       ],[
