@@ -633,10 +633,13 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
         file_path, file_num, start_time, chat_id, msg_id = data
         try:
             await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
+            await asyncio.sleep(0.8)
             
             new_status = await db.get_status(user_id)
             if new_status == "processing_batch":
                 await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
+            else:
+                print(f"DEBUG [Worker]: Cancellation verified. UI overwrite blocked for File {file_num}")    
         except Exception as e:
             if "STOP_TRANSMISSION" in str(e):
                 return
@@ -681,6 +684,7 @@ async def run_batch(client, acc, message, start_link, count):
             # 4. PRE-TRANSFER CANCEL CHECK
             current_status = await db.get_status(user_id)
             if current_status != "processing_batch":
+                await asyncio.sleep(1.2)
                 await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i-1}/{count} files.")
                 break 
 
