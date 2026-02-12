@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pyrogram import Client
 from typing import BinaryIO, Union
+from pyrogram.utils import get_peer_type
 
 # Initialize the Web Server
 app = FastAPI()
@@ -107,26 +108,36 @@ async def player(chat_id: int, msg_id: int):
 
 @app.get("/stream/{chat_id}/{msg_id}")
 async def stream_video(request: Request, chat_id: Union[int, str], msg_id: int):
-    # Ensure ID is an integer for private channels
-    if isinstance(chat_id, str) and chat_id.startswith("-100"):
-        chat_id = int(chat_id)
+    # 1. Convert to Int (Mechanical Standard)
+    try:
+        if isinstance(chat_id, str) and chat_id.startswith("-100"):
+            chat_id = int(chat_id)
+        elif isinstance(chat_id, str):
+            chat_id = int(chat_id)
+    except: pass # It's a username
 
     try:
-        # Step 1: Just get the message directly. 
-        # Since we injected 'RazzeshUser', the client now has admin permissions.
-        msg = await client.get_messages(chat_id, msg_id)
-        
+        # 2. THE LEGENDARY FIX: Use get_messages on the ID directly
+        # But we wrap it in a 'try' to catch the resolution error
+        try:
+            msg = await client.get_messages(chat_id, msg_id)
+        except (KeyError, Exception):
+            # If Pyrogram says "ID not found", we force it to see the chat
+            # By sending a tiny ping to the ID
+            await client.get_chat(chat_id)
+            msg = await client.get_messages(chat_id, msg_id)
+
         if not msg or not msg.video:
-            return Response("Video not found or inaccessible", status_code=404)
+            return Response("Video not found", status_code=404)
         
-        # Step 2: Stream the bytes
         file_size = msg.video.file_size
         stream = TGFileStream(client, chat_id, msg_id, file_size)
         return await range_streamer(request, stream, file_size)
 
     except Exception as e:
+        # If still failing, it's a permission issue or DC mismatch
         logging.error(f"🎬 Cinema Error: {e}")
-        return Response(f"Internal Error: {e}", status_code=500)
+        return Response(f"Security Error: {e}", status_code=500)
     
 async def get_file_offset(self, chat_id, message_id, offset, limit):
     """
