@@ -153,6 +153,17 @@ class Database:
         # Toggles the switch
         await self.col.update_one({'id': int(id)}, {'$set': {'batch_index': status}})
 
+    async def set_custom_thumb(self, id, file_id):
+        # Saves the Telegram File ID of the image
+        await self.col.update_one({'id': int(id)}, {'$set': {'custom_thumb': file_id}}, upsert=True)
+
+    async def get_custom_thumb(self, id):
+        user = await self.col.find_one({'id': int(id)})
+        return user.get('custom_thumb', None)
+    
+    async def delete_custom_thumb(self, id):
+        await self.col.update_one({'id': int(id)}, {'$unset': {'custom_thumb': 1}})    
+
 db = Database(DB_URI, "Razzeshbot")
 print("Database Connected processing bot")
 

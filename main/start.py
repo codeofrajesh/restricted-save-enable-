@@ -11,6 +11,7 @@ from database.db import db
 from .strings import HELP_TXT
 from bot import RazzeshUser
 from config import ADMINS
+from PIL import Image
 
 class batch_temp(object):
     IS_BATCH = {}
@@ -106,6 +107,8 @@ async def settings_menu(client, callback_query):
     buttons = [[
         InlineKeyboardButton("📝 Set Custom Caption", callback_data="set_caption_action")
       ],[
+          InlineKeyboardButton("🖼️ Custom Thumbnail", callback_data="set_thumb_action")
+      ],[
 		InlineKeyboardButton("📤 Customized Upload", callback_data="set_upload_action")
 	  ],[
           InlineKeyboardButton("⚡ Parallel Batch", callback_data="parallel_settings")
@@ -176,7 +179,27 @@ async def cap_mode_batch(client, callback_query):
         "• **Tip:** Ask an AI: *'Write a list of captions for [Course Name] separated by ///'*.\n\n"
         "**⚠️ Note:** This list is ONE-TIME use. It clears after the batch finishes."
     )    
-	
+#custom thumbnail callback
+
+THUMB_RETRIES = {}
+
+@Client.on_callback_query(filters.regex("set_thumb_action"))
+async def set_thumb_process(client, callback_query):
+    user_id = callback_query.from_user.id
+    
+    # Reset retries when entering mode
+    THUMB_RETRIES[user_id] = 0
+    
+    await db.set_status(user_id, "awaiting_custom_thumb")
+    await callback_query.message.edit_text(
+        "**🖼️ Custom Thumbnail Setup**\n\n"
+        "Send the **Photo** you want to use as the thumbnail for all videos.\n\n"
+        "• Format: `.jpg` or `.png` (Send as Photo, not File)\n"
+        "• Type `off` to delete your custom thumbnail.\n"
+        "• Type `/cancel` to abort.\n\n"
+        "**⚠️ Note:** You have 2 attempts to send a valid image."
+    )	
+
 #customized upload
 @Client.on_callback_query(filters.regex("set_upload_action"))
 async def set_upload_process(client, callback_query):
@@ -755,7 +778,54 @@ async def handle_user_states(client, message):
             
         message.stop_propagation()
         return
+    
+# --- Section: Handle Custom Thumbnail ---
+    elif status == "awaiting_custom_thumb":
+        # 1. ESCAPE ROUTE (/cancel)
+        if message.text and message.text.lower() == "/cancel":
+            await db.set_status(user_id, None)
+            THUMB_RETRIES.pop(user_id, None)
+            await message.reply("**✅ Thumbnail setup cancelled.**")
+            return
 
+        # 2. DELETE/OFF COMMAND (.delete or off)
+        if message.text and (message.text.lower() == ".delete" or message.text.lower() == "off"):
+            await db.delete_custom_thumb(user_id) # Clears the DB field
+            await db.set_status(user_id, None)
+            THUMB_RETRIES.pop(user_id, None)
+            await message.reply("**🗑️ Custom thumbnail deleted.**\nYour videos will now use their original thumbnails.")
+            return
+
+        # 3. SET/REPLACE THUMBNAIL (Send Photo)
+        if message.photo:
+            # Telegram sends multiple sizes; we take the last one (largest high-res)
+            file_id = message.photo.file_id
+            
+            # This automatically REPLACES any old thumb in the DB
+            await db.set_custom_thumb(user_id, file_id)
+            
+            await db.set_status(user_id, None)
+            THUMB_RETRIES.pop(user_id, None)
+            await message.reply(
+                "**✅ Custom Thumbnail Saved!**\n\n"
+                "• This image will replace the original thumbnail for all future files.\n"
+                "• To remove it, go to Settings -> Custom Thumbnail and type `.delete`."
+            )
+            return
+        
+        # 4. INVALID INPUT HANDLING (2 Tries)
+        else:
+            current_try = THUMB_RETRIES.get(user_id, 0) + 1
+            THUMB_RETRIES[user_id] = current_try
+            
+            if current_try >= 2:
+                await db.set_status(user_id, None)
+                THUMB_RETRIES.pop(user_id, None)
+                await message.reply("**❌ Too many invalid attempts.** Exiting Thumbnail Mode.")
+            else:
+                await message.reply(f"⚠️ **Invalid Format!**\n\nPlease send a **Photo** to set a thumbnail, or type `.delete` to remove the existing one.\n\nAttempts left: {2 - current_try}")
+            return
+        
 #save function 
 @Client.on_message(filters.text & filters.private, group=1)
 async def save(client: Client, message: Message):
@@ -1214,6 +1284,40 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     
     caption = final_caption
     sent_msg = None
+
+    # --- THUMBNAIL PROCESSING ENGINE ---
+    custom_thumb_id = await db.get_custom_thumb(user_id)
+    final_thumb_path = None
+    
+    # 1. Check if user wants a custom thumb
+    if custom_thumb_id:
+        try:
+            # Download user's custom image
+            custom_thumb_path = await client.download_media(custom_thumb_id, file_name=f"thumb_{file_num}.jpg")
+            
+            # 2. Determine Original Dimensions (The "Force Attach" Logic)
+            target_width = 320 # Default fallback
+            target_height = 180 
+            
+            if "Video" == msg_type:
+                target_width = msg.video.width
+                target_height = msg.video.height
+            elif "Document" == msg_type and msg.document.thumbs:
+                 # Try to get from thumb if doc has one
+                 target_width = msg.document.thumbs[0].width
+                 target_height = msg.document.thumbs[0].height
+
+            # 3. Resize using Pillow (CNC Precision)
+            if custom_thumb_path:
+                img = Image.open(custom_thumb_path)
+                img = img.resize((target_width, target_height))
+                img.save(custom_thumb_path) # Overwrite with resized version
+                final_thumb_path = custom_thumb_path
+                
+        except Exception as e:
+            print(f"Thumbnail Error: {e}")
+            final_thumb_path = None # Fallback to original
+
     # --- Unified Upload Logic with Kill Switch ---
     try:
         if await db.get_status(user_id) == "cancelled":
@@ -1232,17 +1336,20 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             if ph_path: os.remove(ph_path)
 
         elif "Video" == msg_type:
-            try:
-                ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
-            except:
-                ph_path = None   
-            sent_msg = await client.send_video(
-                chat, file, duration=msg.video.duration, width=msg.video.width, 
-                height=msg.video.height, thumb=ph_path, caption=caption, 
-                reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
-                progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
-            )
-            if ph_path: os.remove(ph_path)
+            if final_thumb_path:
+                ph_path = final_thumb_path
+            else:
+                try:
+                    ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
+                except:
+                    ph_path = None   
+                sent_msg = await client.send_video(
+                    chat, file, duration=msg.video.duration, width=target_width if 'target_width' in locals() else msg.video.width,
+                height=target_height if 'target_height' in locals() else msg.video.height, thumb=ph_path, caption=caption, 
+                    reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
+                    progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
+                )
+                if ph_path: os.remove(ph_path)
 
         elif "Audio" == msg_type:
             try:
