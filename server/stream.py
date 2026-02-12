@@ -114,8 +114,16 @@ async def stream_video(request: Request, chat_id: Union[int, str], msg_id: int):
         if isinstance(chat_id, str) and chat_id.startswith("-100"):
             chat_id = int(chat_id)
             
-        # This line is the magic fix - it syncs the channel to your session
-        await client.get_chat(chat_id) 
+        try:
+            await client.get_chat(chat_id) 
+        except Exception:
+            # ACCESS PROXY: If get_chat fails, we scan recent dialogs 
+            # to force the session to "see" and cache the channel peer.
+            logging.info(f"🔄 Peer not found. Running Access Proxy for {chat_id}...")
+            async for dialog in client.get_dialogs(limit=30):
+                if dialog.chat.id == chat_id:
+                    logging.info(f"✅ Found and cached peer: {dialog.chat.title}")
+                    break
     except Exception as e:
         logging.error(f"Failed to resolve chat {chat_id}: {e}")
         # If we can't find the chat, we can't stream
