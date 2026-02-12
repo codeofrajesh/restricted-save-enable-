@@ -123,7 +123,17 @@ class Database:
 
     async def count_all_users(self):
         # Counts total bot users (if you have a users collection)
-        return await self.col.count_documents({})    
+        return await self.col.count_documents({}) 
+
+    async def get_all_users_list(self):
+        cursor = self.col.find({}) 
+        return await cursor.to_list(length=None)
+        
+    async def get_premium_user_ids(self):
+        # Fetches just the IDs of premium users
+        cursor = self.premium.find({})
+        users = await cursor.to_list(length=None)
+        return [user['_id'] for user in users]   
 
 db = Database(DB_URI, "Razzeshbot")
 print("Database Connected processing bot")

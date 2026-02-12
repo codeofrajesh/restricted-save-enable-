@@ -301,7 +301,70 @@ async def get_stats(client, message):
         f"⚡ **Ping:** `{ping_time}ms`"
     )
     
-    await msg.edit(stats_text)        
+    await msg.edit(stats_text)     
+
+# --- Users List View ---
+def format_user_list(user_list, title):
+    text = f"📋 **{title}**\n\n"
+    for i, user in enumerate(user_list, 1):
+        # Safely get data with defaults if missing
+        uid = user.get('_id', user.get('id', 'Unknown ID'))
+        name = user.get('name', user.get('first_name', 'Unknown Name'))
+        username = user.get('username', None)
+        
+        user_line = f"{i}. 👤 **{name}** "
+        if username:
+            user_line += f"(@{username}) "
+        user_line += f"[`{uid}`]\n"
+        
+        text += user_line
+    return text
+
+# --- /listfree & /listpremium Commands ---
+@Client.on_message(filters.command(["listfree", "listpremium"]) & filters.user(ADMINS))
+async def list_users_handler(client, message):
+    msg = await message.reply("🔄 **Sorting Database... Please Wait.**")
+    
+    # 1. Fetch all raw data
+    all_users = await db.get_all_users_list()
+    premium_ids = await db.get_premium_user_ids()
+    
+    # 2. Filter the lists
+    premium_list = []
+    free_list = []
+    
+    for user in all_users:
+        uid = user.get('_id', user.get('id'))
+        if uid in premium_ids:
+            premium_list.append(user)
+        else:
+            free_list.append(user)
+    command = message.command[0]
+    if command == "listpremium":
+        final_list = premium_list
+        title = "Premium Users List"
+    else:
+        final_list = free_list
+        title = "Free Users List"
+        
+    if not final_list:
+        return await msg.edit(f"📂 **{title} is empty.**")
+    output_text = format_user_list(final_list, title)
+    
+    if len(output_text) > 4000:
+        filename = f"{command}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(output_text.replace("**", "").replace("`", "")) 
+        
+        await msg.delete()
+        await message.reply_document(
+            document=filename,
+            caption=f"📂 **{title}**\n\n⚠️ List too long for text message. Sending file.",
+            file_name=filename
+        )
+        os.remove(filename) 
+    else:
+        await msg.edit(output_text)       
 
 # cancel command
 @Client.on_message(filters.command(["cancel"]))
