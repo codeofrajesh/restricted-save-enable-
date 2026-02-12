@@ -10,6 +10,7 @@ from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION
 from database.db import db
 from .strings import HELP_TXT
 from bot import RazzeshUser
+from config import ADMINS
 
 class batch_temp(object):
     IS_BATCH = {}
@@ -220,12 +221,21 @@ async def send_help(client: Client, message: Message):
 @Client.on_message(filters.command("batch") & filters.private)
 async def batch_cmd(client, message):
     user_id = message.from_user.id
+    from config import ADMINS
     
-    # Initialize batch data in DB
-    # Format: {"link": None, "retries": 0}
+    is_premium = await db.is_premium(user_id)
+    
+    # Check if user is authorized (Premium or Owner)
+    if not is_premium and user_id != ADMINS:
+        return await message.reply(
+            "⭐ **Premium Feature**\n\n"
+            "Batch mode is only available for premium users.\n"
+            "Please contact the @razzeshhere for a free trial or to upgrade.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❣️ Contact Owner", url="https://t.me/razzeshhere")
+            ]])
+        )
     await db.set_batch_data(user_id, {"link": None, "retries": 0})
-    
-    # Set the state so the 'Catcher' knows to look for a link
     await db.set_status(user_id, "awaiting_start_link")
     
     await message.reply(
@@ -234,6 +244,62 @@ async def batch_cmd(client, message):
         "• You have **2 attempts** to provide a valid link.\n"
         "• Type `/cancel` to abort."
     )
+
+#add user ID for owner -
+@Client.on_message(filters.command("add") & filters.user(ADMINS))
+async def add_premium(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Usage:** `/add USER_ID`")
+    
+    try:
+        user_id = int(message.text.split(" ")[1])
+        await db.add_premium_user(user_id)
+        await message.reply(f"✅ **User `{user_id}` has been added to Premium!**")
+    except ValueError:
+        await message.reply("❌ **Invalid User ID. Please send a number.**")
+
+# --- 1. REMOVE PREMIUM COMMAND ---
+@Client.on_message(filters.command("remove") & filters.user(ADMINS))
+async def remove_premium(client, message):
+    if len(message.command) < 2:
+        return await message.reply("⚠️ **Usage:** `/remove USER_ID`")
+    
+    try:
+        user_id = int(message.text.split(" ")[1])
+        
+        # Check if user was actually premium before removing (Optional but good UX)
+        if await db.is_premium(user_id):
+            await db.remove_premium_user(user_id)
+            await message.reply(f"❌ **User `{user_id}` has been removed from Premium.**")
+        else:
+            await message.reply(f"ℹ️ **User `{user_id}` was not a premium user.**")
+            
+    except ValueError:
+        await message.reply("❌ **Invalid User ID. Please send a number.**")
+
+# ---STATS BOX ---
+@Client.on_message(filters.command("stats") & filters.user(ADMINS))
+async def get_stats(client, message):
+    # Fetching data
+    msg = await message.reply("🔄 **Fetching Statistics...**")
+    total_users = await db.count_all_users()
+    premium_users = await db.count_premium_users()
+    free_users = total_users - premium_users
+    
+    # The "Box Type" Design
+    stats_text = (
+        "╭─── [ 📊 **SYSTEM STATUS** ] ───╮\n"
+        "│\n"
+        f"│  👥  **Total Users** : `{total_users}`\n"
+        f"│  👑  **Premium** : `{premium_users}`\n"
+        f"│  👤  **Free Users** : `{free_users}`\n"
+        "│\n"
+        "╰──────────────────────────╯\n\n"
+        f"⚡ **Ping:** `{round(client.ping_interval * 1000, 2)}ms`" 
+        # Note: ping logic might vary based on your bot instance, removed if not needed.
+    )
+    
+    await msg.edit(stats_text)        
 
 # cancel command
 @Client.on_message(filters.command(["cancel"]))

@@ -104,6 +104,26 @@ class Database:
         user = await self.col.find_one({'id': int(id)})
         return user.get('parallel_batch', False) if user else False
 
+    async def add_premium_user(self, user_id):
+        await self.premium.update_one({'_id': user_id}, {'$set': {'premium': True}}, upsert=True)
+
+    async def is_premium(self, user_id):
+        # Check if user exists in premium list
+        user = await self.premium.find_one({'_id': user_id})
+        return user is not None    
+
+    async def remove_premium_user(self, user_id):
+        # Physically removes the user from the premium collection
+        await self.premium.delete_one({'_id': int(user_id)})
+
+    async def count_premium_users(self):
+        # Counts total premium subscriptions
+        return await self.premium.count_documents({})
+
+    async def count_all_users(self):
+        # Counts total bot users (if you have a users collection)
+        return await self.col.count_documents({})    
+
 db = Database(DB_URI, "Razzeshbot")
 print("Database Connected processing bot")
 
