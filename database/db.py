@@ -135,6 +135,15 @@ class Database:
         cursor = self.premium.find({})
         users = await cursor.to_list(length=None)
         return [user['_id'] for user in users]   
+    
+    async def get_batch_index_status(self, id):
+        # Checks if the user wants the index (Default: False/OFF)
+        user = await self.col.find_one({'id': int(id)})
+        return user.get('batch_index', False) 
+
+    async def set_batch_index_status(self, id, status):
+        # Toggles the switch
+        await self.col.update_one({'id': int(id)}, {'$set': {'batch_index': status}})
 
 db = Database(DB_URI, "Razzeshbot")
 print("Database Connected processing bot")

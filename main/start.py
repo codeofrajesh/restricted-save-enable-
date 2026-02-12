@@ -107,6 +107,8 @@ async def settings_menu(client, callback_query):
 	  ],[
           InlineKeyboardButton("⚡ Parallel Batch", callback_data="parallel_settings")
       ],[
+          InlineKeyboardButton(f"🗂️ Batch Index: {idx_text}", callback_data="toggle_batch_index")
+      ],[
         InlineKeyboardButton("🔙 Back to Main", callback_data="back_to_start")
     ]]
     await callback_query.message.edit_text(
@@ -208,6 +210,20 @@ async def parallel_toggle(client, callback_query):
     await db.set_parallel_status(callback_query.from_user.id, is_on)
     await callback_query.answer(f"Parallel Batch: {'Enabled' if is_on else 'Disabled'}")
     await parallel_settings(client, callback_query)    
+
+# --- NEW CALLBACK FOR TOGGLE ---
+@Client.on_callback_query(filters.regex("toggle_batch_index"))
+async def toggle_batch_index(client, callback_query):
+    user_id = callback_query.from_user.id
+    current_status = await db.get_batch_index_status(user_id)
+    
+    # Flip the switch
+    new_status = not current_status
+    await db.set_batch_index_status(user_id, new_status)
+    
+    await callback_query.answer(f"Batch Index {'Enabled' if new_status else 'Disabled'}")
+    # Refresh the menu to show new icon
+    await settings_menu(client, callback_query)    
 	
 # help command
 @Client.on_message(filters.command(["help"]))
@@ -784,7 +800,7 @@ async def save(client: Client, message: Message):
             batch_temp.IS_BATCH[message.from_user.id] = True
 
 #upload worker 
-async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count):
+async def upload_worker(client, acc, message, upload_queue, stats_msg, total_count, index_list):
     user_id = message.from_user.id
     while True:
         data = await upload_queue.get()
@@ -798,7 +814,20 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
         
         file_path, file_num, start_time, chat_id, msg_id = data
         try:
-            await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
+            sent_msg = await handle_private(client, acc, message, chat_id, msg_id, start_time, file_num, upload_only_file=file_path)
+            
+            # --- DATA RECORDING FOR INDEX ---
+            if sent_msg:
+                final_caption = sent_msg.caption if sent_msg.caption else f"File {file_num}"
+                display_name = final_caption.split('\n')[0][:50] 
+                
+                # 2. Add to Shared List (Thread Safe enough for append)
+                index_list.append({
+                    "num": file_num,
+                    "id": sent_msg.id,
+                    "name": display_name,
+                    "link": sent_msg.link if sent_msg.link else f"https://t.me/c/{str(user_id)[4:] if str(user_id).startswith('-100') else user_id}/{sent_msg.id}"
+                })
             await asyncio.sleep(0.8)
             
             new_status = await db.get_status(user_id)
@@ -823,7 +852,7 @@ async def run_batch(client, acc, message, start_link, count):
     
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
-    
+    index_list = []
     # 1. INITIALIZE RAILWAY TRACKS
     # The Queue acts as the 'buffer' between download and upload lanes
     upload_queue = asyncio.Queue(maxsize=1) 
@@ -832,7 +861,7 @@ async def run_batch(client, acc, message, start_link, count):
     stats_msg = await message.reply(f"📊 **Batch Started:** 0/{count} files processed.")
     
     # 2. START THE UPLOAD WORKER (TRACK 2)
-    uploader = asyncio.create_task(upload_worker(client, acc, message, upload_queue, stats_msg, count))
+    uploader = asyncio.create_task(upload_worker(client, acc, message, upload_queue, stats_msg, count, index_list))
     
     try:
         await db.set_status(user_id, "processing_batch")
@@ -888,6 +917,25 @@ async def run_batch(client, acc, message, start_link, count):
         
         await upload_queue.put(None) 
         await uploader
+        #-----BATCH INDEX------
+        if await db.get_batch_index_status(user_id):
+            index_list.sort(key=lambda x: x['num'])
+            index_text = "🗂️ **Batch Index**\n\n"
+            temp_text = index_text
+            
+            for item in index_list:
+                # Format: [File Name](Link)
+                line = f"{item['num']}. [{item['name']}]({item['link']})\n"
+                
+                # 4096 Char Limit Check (Overflow Valve)
+                if len(temp_text) + len(line) > 4000:
+                    await message.reply(temp_text, disable_web_page_preview=True)
+                    temp_text = "🗂️ **Batch Index (Cont.)**\n\n" + line
+                else:
+                    temp_text += line
+            if len(temp_text) > len("🗂️ **Batch Index (Cont.)**\n\n"):
+                await message.reply(temp_text, disable_web_page_preview=True)
+
         final_status = await db.get_status(user_id)
         if final_status == "cancelled":
              await stats_msg.reply("🛑 **Batch Cancelled !!.**")
@@ -1069,7 +1117,8 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
     else:
         caption = original_caption
-
+    
+    sent_msg = None
     # --- Unified Upload Logic with Kill Switch ---
     try:
         if await db.get_status(user_id) == "cancelled":
@@ -1080,7 +1129,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 ph_path = await acc.download_media(msg.document.thumbs[0].file_id)
             except:
                 ph_path = None
-            await client.send_document(
+            sent_msg = await client.send_document(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
                 progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
@@ -1092,7 +1141,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 ph_path = await acc.download_media(msg.video.thumbs[0].file_id)
             except:
                 ph_path = None   
-            await client.send_video(
+            sent_msg = await client.send_video(
                 chat, file, duration=msg.video.duration, width=msg.video.width, 
                 height=msg.video.height, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
@@ -1105,7 +1154,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 ph_path = await acc.download_media(msg.audio.thumbs[0].file_id)
             except:
                 ph_path = None
-            await client.send_audio(
+            sent_msg = await client.send_audio(
                 chat, file, thumb=ph_path, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
                 progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
@@ -1113,20 +1162,20 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             if ph_path: os.remove(ph_path)
 
         elif "Animation" == msg_type:
-            await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+            sent_msg = await client.send_animation(chat, file, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
         elif "Sticker" == msg_type:
-            await client.send_sticker(chat, file, reply_to_message_id=message.id)
+            sent_msg = await client.send_sticker(chat, file, reply_to_message_id=message.id)
 
         elif "Voice" == msg_type:
-            await client.send_voice(
+            sent_msg = await client.send_voice(
                 chat, file, caption=caption, 
                 reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML, 
                 progress=progress, progress_args=[message, f"_{file_num}_up", user_id, db, start_time, file_num]
             )
 
         elif "Photo" == msg_type:
-            await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
+            sent_msg = await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
     except Exception as e:
         err_text = str(e)
@@ -1161,6 +1210,7 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
         os.remove(file)# Protects your 26GB storage
 
     await client.delete_messages(user_chat, [smsg.id])
+    return sent_msg
 
 
 # get the type of message
