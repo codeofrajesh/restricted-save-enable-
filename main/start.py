@@ -709,11 +709,16 @@ async def run_batch(client, acc, message, start_link, count):
             except Exception as e:
                 # 7. MID-TRANSFER KILL SWITCH
                 if "STOP_TRANSMISSION" in str(e):
-                    await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i-1}/{count} files.")
-                    break 
-                
-                print(f"Batch Item Error: {e}")
-                continue
+                    # Kill worker
+                    if not uploader.done(): 
+                        uploader.cancel()
+                    
+                    await asyncio.sleep(1)
+                    await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i}/{count} files.")
+                    return 
+                else:
+                    print(f"Batch Item Error: {e}")
+                    continue
         
         await upload_queue.put(None) 
         await uploader
