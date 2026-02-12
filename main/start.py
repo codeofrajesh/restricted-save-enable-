@@ -639,7 +639,8 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
             if new_status == "processing_batch":
                 await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{total_count} files processed.")
             else:
-                print(f"DEBUG [Worker]: Cancellation verified. UI overwrite blocked for File {file_num}")    
+                print(f"DEBUG [Worker]: Cancellation verified. UI overwrite blocked for File {file_num}")  
+                return  
         except Exception as e:
             if "STOP_TRANSMISSION" in str(e):
                 return
@@ -721,8 +722,12 @@ async def run_batch(client, acc, message, start_link, count):
              await stats_msg.reply("✅ **Batch Processing Complete!**")
     finally:
         # 9. CLEAN UP STATE AND SESSION
+
+        await asyncio.sleep(2)
         batch_temp.IS_BATCH[user_id] = True
-        await db.set_status(user_id, None)
+        current = await db.get_status(user_id)
+        if current != "cancelled":
+            await db.set_status(user_id, None
         if LOGIN_SYSTEM == True:
             try:
                 await acc.disconnect()
