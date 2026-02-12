@@ -298,7 +298,7 @@ async def get_stats(client, message):
         f"│  👤  **Free Users** : `{free_users}`\n"
         "│\n"
         "╰──────────────────────────╯\n\n"
-        f"⚡ **Ping:** `{ping_time}ms`".
+        f"⚡ **Ping:** `{ping_time}ms`"
     )
     
     await msg.edit(stats_text)        
