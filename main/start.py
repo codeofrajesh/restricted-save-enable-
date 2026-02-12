@@ -777,8 +777,6 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
             f"⌛️ **Elapsed •** {elapsed}"
         )
         
-        status_file = f'{message.id}{type}.txt'
-        
         try:
         # Use a local variable for ID to prevent NoneType during the 'raise' period
             msg_id = getattr(message, 'id', None)
