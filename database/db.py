@@ -11,17 +11,18 @@ class Database:
         self.col = self.db.users
         self.premium = self.db.premium_users
 
-    def new_user(self, id, name):
+    def new_user(self, id, name, username):
         return dict(
             id = id,
             name = name,
             session = None,
+            username = username,
             api_id = None,
             api_hash = None,
         )
     
-    async def add_user(self, id, name):
-        user = self.new_user(id, name)
+    async def add_user(self, id, name, username):
+        user = self.new_user(id, name, username)
         await self.col.insert_one(user)
     
     async def is_user_exist(self, id):

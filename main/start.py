@@ -71,7 +71,7 @@ async def upstatus(client, statusfile, message, chat, file_num):
 async def send_start(client: Client, message: Message):
     print("DEBUG: Start command received!")
     if not await db.is_user_exist(message.from_user.id):
-        await db.add_user(message.from_user.id, message.from_user.first_name)
+        await db.add_user(message.from_user.id, message.from_user.first_name, message.from_user.username)
     
     # Using a high-quality GIF URL
     START_GIF = "https://c.tenor.com/HXvyLMZcw_8AAAAC/tenor.gif" 
@@ -307,17 +307,26 @@ async def get_stats(client, message):
 def format_user_list(user_list, title):
     text = f"📋 **{title}**\n\n"
     for i, user in enumerate(user_list, 1):
-        # Safely get data with defaults if missing
-        uid = user.get('_id', user.get('id', 'Unknown ID'))
+        uid = user.get('id')
+        if uid is None:
+            temp_id = user.get('_id')
+            if isinstance(temp_id, int):
+                uid = temp_id
+            else:
+                uid = "No Integer ID Found"
+
+        # 2. NAME & USERNAME FETCHING
         name = user.get('name', user.get('first_name', 'Unknown Name'))
         username = user.get('username', None)
         
+        # 3. CONSTRUCT THE LINE
         user_line = f"{i}. 👤 **{name}** "
         if username:
             user_line += f"(@{username}) "
-        user_line += f"[`{uid}`]\n"
         
+        user_line += f"[`{uid}`]\n"
         text += user_line
+        
     return text
 
 # --- /listfree & /listpremium Commands ---
