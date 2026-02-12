@@ -45,11 +45,12 @@ if __name__ == "__main__":
     
     # Logic: If you provided a String Session (Owner Account), use it.
     # If not, use the Bot itself (limited to public/bot chats).
-    if RazzeshUser is not None:
+    if RazzeshUser and RazzeshUser.is_connected():
+        print("🛠️ System: Injecting Telethon User into Stream Server...")
         server.stream.client = RazzeshUser
     else:
         print("⚠️ WARNING: User Account not found. Streaming may fail for private channels.")
-        server.stream.client = bot
+        #server.stream.client = bot
          
     # Define the server starter
     def start_web_server():

@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse, HTMLResponse
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
+from telethon.tl.functions.messages import GetMessagesRequest
 import uvicorn
 
 app = FastAPI()
@@ -34,22 +35,31 @@ async def player(chat_id: int, msg_id: int):
 @app.get("/stream/{chat_id}/{msg_id}")
 async def stream_video(request: Request, chat_id: int, msg_id: int):
     try:
-        # 1. Fetch the message using Telethon's superior peer resolution
-        entity = await client.get_input_entity(chat_id)
-        msg = await client.get_messages(entity, ids=msg_id)
+        # Telethon sometimes needs the 'peer' to be explicitly found
+        # especially for private channels like -100...
+        try:
+            entity = await client.get_entity(chat_id)
+        except Exception:
+            # If not found, force a refresh of the dialogs to find it
+            async for dialog in client.iter_dialogs():
+                if dialog.id == chat_id:
+                    entity = dialog.entity
+                    break
+
+        # Fetch the message using the resolved entity
+        msg_result = await client(GetMessagesRequest(peer=entity, id=[msg_id]))
+        msg = msg_result.messages[0]
         
         if not msg or not msg.media:
             return Response("Media not found", status_code=404)
 
         file_size = msg.file.size
         
-        # 2. The Streamer Generator
         async def file_generator():
-            # Telethon's iter_download is built for streaming
-            async for chunk in client.iter_download(msg.media, chunk_size=1024*512):
+            # Standard chunking for smooth playback
+            async for chunk in client.iter_download(msg.media, chunk_size=1024*1024):
                 yield chunk
 
-        # 3. Standard HTTP Range Support
         return StreamingResponse(
             file_generator(),
             media_type=msg.file.mime_type,
@@ -59,5 +69,5 @@ async def stream_video(request: Request, chat_id: int, msg_id: int):
             }
         )
     except Exception as e:
-        logging.error(f"Telethon Stream Error: {e}")
-        return Response(f"Stream Error: {e}", status_code=500)
+        logging.error(f"🎬 Telethon High-Level Error: {e}")
+        return Response(f"Internal Error: {e}", status_code=500)
