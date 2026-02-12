@@ -138,4 +138,14 @@ async def stream_video(request: Request, chat_id: Union[int, str], msg_id: int):
         logging.error(f"Streaming error: {e}")
         return Response(f"Internal Error: {e}", status_code=500)
     
+async def get_file_offset(self, chat_id, message_id, offset, limit):
+    """
+    This is a custom patch for Pyrogram to allow streaming specific 
+    byte ranges (offset and limit) from Telegram.
+    """
+    # Use the stream_media generator to fetch only the requested chunk
+    async for chunk in self.stream_media(message_id, limit=limit, offset=offset):
+        return chunk 
+    return b""    
+    
 Client.get_file_offset = get_file_offset
