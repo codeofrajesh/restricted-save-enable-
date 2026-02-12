@@ -685,6 +685,8 @@ async def run_batch(client, acc, message, start_link, count):
             # 4. PRE-TRANSFER CANCEL CHECK
             current_status = await db.get_status(user_id)
             if current_status != "processing_batch":
+                if not uploader.done():
+                    uploader.cancel()
                 await asyncio.sleep(1.2)
                 await stats_msg.edit_text(f"🛑 **Batch Cancelled!** Processed {i-1}/{count} files.")
                 break 
