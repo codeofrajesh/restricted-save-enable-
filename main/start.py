@@ -280,8 +280,11 @@ async def remove_premium(client, message):
 # ---STATS BOX ---
 @Client.on_message(filters.command("stats") & filters.user(ADMINS))
 async def get_stats(client, message):
+    start_time = time.time()
     # Fetching data
     msg = await message.reply("🔄 **Fetching Statistics...**")
+    end_time = time.time()
+    ping_time = round((end_time - start_time) * 1000, 2)
     total_users = await db.count_all_users()
     premium_users = await db.count_premium_users()
     free_users = total_users - premium_users
@@ -295,8 +298,7 @@ async def get_stats(client, message):
         f"│  👤  **Free Users** : `{free_users}`\n"
         "│\n"
         "╰──────────────────────────╯\n\n"
-        f"⚡ **Ping:** `{round(client.ping_interval * 1000, 2)}ms`" 
-        # Note: ping logic might vary based on your bot instance, removed if not needed.
+        f"⚡ **Ping:** `{ping_time}ms`".
     )
     
     await msg.edit(stats_text)        
