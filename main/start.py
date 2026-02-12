@@ -137,20 +137,45 @@ async def back_to_start(client, callback_query):
 #set_caption
 @Client.on_callback_query(filters.regex("set_caption_action"))
 async def set_caption_process(client, callback_query):
-    user_id = callback_query.from_user.id
-    
-    # 1. Update status in DB so bot knows to catch the next message
-    await db.set_status(user_id, "uploading_caption")
-    
-    # 2. Inform user (The bot finishes here and waits for a new message)
+    buttons = [
+        [InlineKeyboardButton("📝 Single Caption (Apply to All)", callback_data="cap_mode_single")],
+        [InlineKeyboardButton("🔢 Batch Caption (Sequence)", callback_data="cap_mode_batch")],
+        [InlineKeyboardButton("🔙 Back", callback_data="settings_home")]
+    ]
     await callback_query.message.edit_text(
-        "**📝 Custom Caption Settings**\n\n"
-        "Send the new caption you want to use. You can use these options:\n"
-        "• `{caption}` - To keep the original text and add yours.\n"
-        "• `off` - To turn off custom captions completely.\n"
-        "• `/cancel` - To stop and go back.\n\n"
-        "**Send your caption now:**",
+        "**📝 Custom Caption Setup**\n\n"
+        "Choose how you want to caption your files:\n\n"
+        "**1. Single Caption:** One caption applied to every file in the batch.\n"
+        "**2. Batch Caption:** A specific list of captions for each file (e.g., Ep 1, Ep 2...).",
+        reply_markup=InlineKeyboardMarkup(buttons)
     ) 
+
+@Client.on_callback_query(filters.regex("cap_mode_single"))
+async def cap_mode_single(client, callback_query):
+    user_id = callback_query.from_user.id
+    await db.set_status(user_id, "awaiting_caption_single")
+    await callback_query.message.edit_text(
+        "**📝 Set Single Caption**\n\n"
+        "Send the caption you want to use for **ALL** files.\n\n"
+        "• `{caption}` - Keep original text.\n"
+        "• `off` - Disable custom captions.\n"
+        "• `/cancel` - Cancel."
+    )
+
+@Client.on_callback_query(filters.regex("cap_mode_batch"))
+async def cap_mode_batch(client, callback_query):
+    user_id = callback_query.from_user.id
+    await db.set_status(user_id, "awaiting_caption_batch")
+    await callback_query.message.edit_text(
+        "**🔢 Set Batch Caption**\n\n"
+        "Send a list of captions separated by `///`.\n\n"
+        "**Format:** `Caption 1///Caption 2///Caption 3`\n\n"
+        "**💡 Logic:**\n"
+        "• The bot applies them in order: File 1 gets Caption 1, File 2 gets Caption 2.\n"
+        "• If you have 20 files but only 3 captions, files 4-20 will use their original caption.\n"
+        "• **Tip:** Ask an AI: *'Write a list of captions for [Course Name] separated by ///'*.\n\n"
+        "**⚠️ Note:** This list is ONE-TIME use. It clears after the batch finishes."
+    )    
 	
 #customized upload
 @Client.on_callback_query(filters.regex("set_upload_action"))
@@ -477,11 +502,11 @@ async def handle_user_states(client, message):
     status = await db.get_status(user_id)
 
     # --- Section 1: Handle Custom Caption States ---
-    if status == "uploading_caption":
+    if status == "awaiting_caption_single":
         if message.text.lower() == "/cancel":
             await db.set_status(user_id, None)
             
-            # Check if a process is active
+            # --- PAST LOGIC: CLEANUP (Preserved) ---
             up_log = f"{message.id}upstatus.txt"
             down_log = f"{message.id}downstatus.txt"
             
@@ -499,23 +524,65 @@ async def handle_user_states(client, message):
                 except Exception as e:
                     print(f"Cleanup Error: {e}")
             else:
-                await message.reply("**✅ Caption menu cancelled.**")
-
+                await message.reply("**✅ Single caption setup cancelled.**")
+            
             message.stop_propagation()
-            return 
+            return
 
         elif message.text.lower() == "off":
             await db.set_custom_caption(user_id, "off")
+            await db.set_caption_mode(user_id, "single") # Reset mode
             await db.set_status(user_id, None)
             await message.reply("**❌ Custom caption disabled.**")
             message.stop_propagation()
             return
         else:
             await db.set_custom_caption(user_id, message.text)
+            await db.set_caption_mode(user_id, "single") # Set mode
             await db.set_status(user_id, None)
-            await message.reply("**✅ Custom caption saved!**")
+            await message.reply("**✅ Single Caption Saved!**\nThis will apply to all future files.")
             message.stop_propagation()
             return
+
+    elif status == "awaiting_caption_batch":
+        if message.text.lower() == "/cancel":
+            await db.set_status(user_id, None)
+            
+            # --- PAST LOGIC: CLEANUP (Preserved) ---
+            up_log = f"{message.id}upstatus.txt"
+            down_log = f"{message.id}downstatus.txt"
+            
+            if os.path.exists(up_log) or os.path.exists(down_log):
+                try:
+                    for f in [up_log, down_log]:
+                        if os.path.exists(f): 
+                            os.remove(f)
+                    if os.path.exists("downloads"):
+                        for file in os.listdir("downloads"):
+                            if str(message.id) in file:
+                                os.remove(os.path.join("downloads", file))
+                    await message.reply("**✅ Active process stopped and storage cleared.**")
+                except Exception as e:
+                    print(f"Cleanup Error: {e}")
+            else:
+                await message.reply("**✅ Batch caption setup cancelled.**")
+
+            message.stop_propagation()
+            return
+
+        # Validate format (Just a warning, we still save it)
+        if "///" not in message.text and len(message.text) < 50:
+             await message.reply("⚠️ **Warning:** No separators (`///`) found. This will look like a single caption. Continue? (Send new text to override or /cancel)")
+        
+        await db.set_custom_caption(user_id, message.text)
+        await db.set_caption_mode(user_id, "batch") # Set mode
+        await db.set_status(user_id, None)
+        await message.reply(
+            "**✅ Batch Captions Queued!**\n\n"
+            "These will be used for your **next batch only** and then cleared."
+        )
+        message.stop_propagation()
+        return
 			
 	# --- NEW SECTION 2: Batch Start Link Controller ---
     elif status == "awaiting_start_link":
@@ -946,6 +1013,11 @@ async def run_batch(client, acc, message, start_link, count):
              await stats_msg.reply("✅ **Batch Processing Complete!**")
     finally:
         # 9. CLEAN UP STATE AND SESSION
+        if await db.get_caption_mode(user_id) == "batch":
+            await db.set_custom_caption(user_id, "off") # Wipe the complex string
+            await db.set_caption_mode(user_id, "single") # Reset to safe default
+            print(f"DEBUG: Batch captions cleared for user {user_id}")
+
 
         await asyncio.sleep(2)
         batch_temp.IS_BATCH[user_id] = True
@@ -1115,12 +1187,32 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
     asyncio.create_task(upstatus(client, f'{message.id}_{file_num}_up.txt', smsg, user_chat, file_num))
 
     user_custom = await db.get_custom_caption(user_id)
+    caption_mode = await db.get_caption_mode(user_id) #
     original_caption = msg.caption if msg.caption else ""
-    if user_custom and user_custom.lower() != "off":
-        caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
-    else:
-        caption = original_caption
     
+    final_caption = original_caption # Default fallback
+
+    if user_custom and user_custom.lower() != "off":
+        
+        # MODE 1: SINGLE CAPTION
+        if caption_mode == "single":
+            final_caption = user_custom.replace("{caption}", original_caption) if "{caption}" in user_custom else user_custom
+            
+        # MODE 2: BATCH CAPTION (The CNC Feed)
+        elif caption_mode == "batch":
+            captions_list = user_custom.split("///")
+            list_index = file_num - 1 
+            
+            if list_index < len(captions_list):
+                raw_cap = captions_list[list_index].strip()
+                if raw_cap: 
+                    final_caption = raw_cap
+                else:
+                    final_caption = original_caption
+            else:
+                final_caption = original_caption
+    
+    caption = final_caption
     sent_msg = None
     # --- Unified Upload Logic with Kill Switch ---
     try:

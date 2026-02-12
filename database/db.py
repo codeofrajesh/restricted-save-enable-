@@ -68,6 +68,14 @@ class Database:
         """Retrieves the custom caption for a specific user."""
         user = await self.col.find_one({'id': int(id)})
         return user.get('custom_caption')
+    
+    async def set_caption_mode(self, id, mode):
+        # mode can be 'single' or 'batch'
+        await self.col.update_one({'id': int(id)}, {'$set': {'caption_mode': mode}}, upsert=True)
+
+    async def get_caption_mode(self, id):
+        user = await self.col.find_one({'id': int(id)})
+        return user.get('caption_mode', 'single') # Default to single
 
     # ADD THESE (For State Handling)
     async def set_status(self, id, status):
