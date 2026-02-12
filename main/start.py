@@ -727,7 +727,7 @@ async def run_batch(client, acc, message, start_link, count):
         batch_temp.IS_BATCH[user_id] = True
         current = await db.get_status(user_id)
         if current != "cancelled":
-            await db.set_status(user_id, None
+            await db.set_status(user_id, None)
         if LOGIN_SYSTEM == True:
             try:
                 await acc.disconnect()
