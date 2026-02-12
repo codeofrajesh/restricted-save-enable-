@@ -106,34 +106,36 @@ async def player(chat_id: int, msg_id: int):
     return HTMLResponse(content=PLAYER_TEMPLATE.format(chat_id=chat_id, msg_id=msg_id))
 
 @app.get("/stream/{chat_id}/{msg_id}")
-async def stream_video(request: Request, chat_id: int, msg_id: int):
-    # 1. Get Metadata
-    msg = await client.get_messages(chat_id, msg_id)
-    if not msg.video: return Response("Not a video", status_code=400)
-    
-    file_size = msg.video.file_size
-    
-    # 2. Initialize Streamer
-    stream = TGFileStream(client, chat_id, msg_id, file_size)
-    
-    # 3. Hand over to Range Handler
-    return await range_streamer(request, stream, file_size)
+async def stream_video(request: Request, chat_id: Union[int, str], msg_id: int):
+    # 1. Warm-up: Resolve the Peer
+    # This forces Pyrogram to 'learn' the channel before fetching the message
+    try:
+        # Convert string chat_id back to int if it's private
+        if isinstance(chat_id, str) and chat_id.startswith("-100"):
+            chat_id = int(chat_id)
+            
+        # This line is the magic fix - it syncs the channel to your session
+        await client.get_chat(chat_id) 
+    except Exception as e:
+        logging.error(f"Failed to resolve chat {chat_id}: {e}")
+        # If we can't find the chat, we can't stream
+        return Response("Chat not found or inaccessible", status_code=404)
 
-# --- Helper to extend Pyrogram Client ---
-# Pyrogram doesn't have a public 'get_file_offset' helper, so we add a patch
-async def get_file_offset(self, chat_id, message_id, offset, limit):
-    # This uses the internal session to fetch specific bytes
-    # Note: Simplification for 'get_file' - usually needs 'FileLocation'
-    # We will use the download_media generator trick for simplicity in V1
+    # 2. Get Metadata
+    try:
+        msg = await client.get_messages(chat_id, msg_id)
+        if not msg or not msg.video:
+            return Response("Video not found", status_code=404)
+        
+        file_size = msg.video.file_size
+        
+        # 3. Initialize Streamer
+        stream = TGFileStream(client, chat_id, msg_id, file_size)
+        
+        # 4. Hand over to Range Handler
+        return await range_streamer(request, stream, file_size)
+    except Exception as e:
+        logging.error(f"Streaming error: {e}")
+        return Response(f"Internal Error: {e}", status_code=500)
     
-    # 🛑 MECHANICAL UPGRADE: 
-    # Standard Pyrogram `download_media` supports in-memory binary objects.
-    # But for True Random Access, we need a dedicated method.
-    # For now, we use the standard generator but discard bytes until offset.
-    # (Note: For true production efficiency, you'd use raw MTProto calls here).
-    
-    async for chunk in self.stream_media(message_id, limit=limit, offset=offset):
-        return chunk # Just return the first chunk found
-    return b""
-
 Client.get_file_offset = get_file_offset
