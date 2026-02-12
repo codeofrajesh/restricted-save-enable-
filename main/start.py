@@ -947,10 +947,24 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
             await client.send_photo(chat, file, caption=caption, reply_to_message_id=message.id, parse_mode=enums.ParseMode.HTML)
 
     except Exception as e:
-        if str(e) == "STOP_TRANSMISSION":
-            await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
+        err_text = str(e)
+        if "STOP_TRANSMISSION" in err_text or "NoneType" in err_text:
+            try:
+                if getattr(smsg, 'id', None):
+                    await smsg.edit("**🛑 Batch Stopped Mid-Upload.**")
+            except:
+                pass
+            return # Exit Track 2 immediately
         elif ERROR_MESSAGE:
-            await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=message.id)
+            try:
+                m_id = getattr(message, 'id', None)
+                if m_id:
+                    await client.send_message(user_chat, f"Error: {e}", reply_to_message_id=m_id)
+                else:
+                    # If message is gone, send error without reply_to
+                    await client.send_message(user_chat, f"Error: {e}")
+            except:
+                pass
 
     # --- Final Cleanup Section ---
     status_path = f'{message.id}_{file_num}_up.txt'
