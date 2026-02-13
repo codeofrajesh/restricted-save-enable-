@@ -834,13 +834,11 @@ async def handle_user_states(client, message):
                 acc = RazzeshUser
 
             await db.set_status(user_id, "processing_batch")
-            await run_batch(client, acc, message, start_link, count=count)
-            message.stop_propagation()			
+            await run_batch(client, acc, message, start_link, count=count)		
             
         except Exception as e:
             await db.set_status(user_id, None)
-            await message.reply(f"❌ **Error:** {str(e)}")
-            message.stop_propagation()			
+            await message.reply(f"❌ **Error:** {str(e)}")			
             
         message.stop_propagation()
         return
