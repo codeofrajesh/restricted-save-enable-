@@ -335,7 +335,7 @@ async def batch_cmd(client, message):
     
     is_premium = await db.is_premium(user_id)
     
-    if not is_premium and user_id not in ADMINS:
+    if not is_premium and user_id != ADMINS:
         return await message.reply(
             "⭐ **Premium Feature**\n\nBatch mode is only available for premium users.\nPlease contact the owner.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❣️ Contact Owner", url="https://t.me/razzeshhere")]])
