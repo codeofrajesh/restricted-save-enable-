@@ -222,8 +222,8 @@ async def cap_mode_batch(client, callback_query):
         "• **Tip:** Ask an AI: *'Write a list of captions for [Course Name] separated by ///'*.\n\n"
         "**⚠️ Note:** This list is ONE-TIME use. It clears after the batch finishes."
     )    
-#custom thumbnail callback
 
+#custom thumbnail callback
 THUMB_RETRIES = {}
 
 @Client.on_callback_query(filters.regex("set_thumb_action"))
@@ -335,25 +335,48 @@ async def batch_cmd(client, message):
     
     is_premium = await db.is_premium(user_id)
     
-    # Check if user is authorized (Premium or Owner)
-    if not is_premium and user_id != ADMINS:
+    if not is_premium and user_id not in ADMINS:
         return await message.reply(
-            "⭐ **Premium Feature**\n\n"
-            "Batch mode is only available for premium users.\n"
-            "Please contact the @razzeshhere for a free trial or to upgrade.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("❣️ Contact Owner", url="https://t.me/razzeshhere")
-            ]])
+            "⭐ **Premium Feature**\n\nBatch mode is only available for premium users.\nPlease contact the owner.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❣️ Contact Owner", url="https://t.me/razzeshhere")]])
         )
-    await db.set_batch_data(user_id, {"link": None, "retries": 0})
-    await db.set_status(user_id, "awaiting_start_link")
+    
+    await db.set_status(user_id, "choosing_batch_filter")
+    
+    buttons = [
+        [InlineKeyboardButton("All 🌐", callback_data="filter_all")],
+        [
+            InlineKeyboardButton("Video 🎥", callback_data="filter_video"), 
+            InlineKeyboardButton("Photos 📸", callback_data="filter_photo")
+        ],
+        [
+            InlineKeyboardButton("Document 📄", callback_data="filter_document"), 
+            InlineKeyboardButton("Audio 🎵", callback_data="filter_audio")
+        ],
+        [
+            InlineKeyboardButton("Animation/GIF 🎞", callback_data="filter_animation")
+        ]
+    ]
     
     await message.reply(
-        "📦 **Batch Mode Started**\n\n"
-        "Please send the **Starting Post Link**.\n\n"
-        "• You have **2 attempts** to provide a valid link.\n"
-        "• Type `/cancel` to abort."
+        "🛠 **Batch Configuration**\n\nSelect the specific file type you want to extract:",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
+
+#filter batch command
+@Client.on_callback_query(filters.regex(r"^filter_"))
+async def set_batch_filter_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    selected_filter = callback_query.data.split("_")[1]
+    
+    await db.set_batch_data(user_id, {"link": None, "retries": 0, "filter": selected_filter})
+    await db.set_status(user_id, "awaiting_start_link")
+    
+    await callback_query.message.edit_text(
+        f"✅ **Filter Set to:** `{selected_filter.capitalize()}`\n\n"
+        "📦 **Batch Mode**\n\nPlease send the **Starting Post Link**.\n\n"
+        "• You have **2 attempts** to provide a valid link.\n• Type `/cancel` to abort."
+    )    
 
 #add user ID for owner -
 @Client.on_message(filters.command("add") & filters.user(ADMINS))
@@ -1032,6 +1055,8 @@ async def run_batch(client, acc, message, start_link, count):
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
     batch_start_time = time.time()
+    batch_data = await db.get_batch_data(user_id)
+    user_filter = batch_data.get("filter", "all")
     
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
@@ -1072,9 +1097,16 @@ async def run_batch(client, acc, message, start_link, count):
             try:
                 # 5. DOWNLOAD LANE (TRACK 1)
                 # 'download_only=True' tells handle_private to stop after saving the file
-                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num, download_only=True)
+                file_path = await handle_private(client, acc, message, chat_id, current_msg_id, batch_start_time, file_num, download_only=True, user_filter=user_filter)
                 
-                if file_path and os.path.exists(file_path):
+                if file_path == "SKIPPED":
+                    if file_num % 5 == 0 or file_num == count:
+                        try:
+                            await stats_msg.edit_text(f"📊 **Batch Progress:** {file_num}/{count} files parsed.\n⏭️ Skipped file (Filter applied).")
+                        except: pass
+                    continue
+                
+                if file_path and file_path != "SKIPPED" and os.path.exists(file_path):
                     # 6. FEED THE UPLOAD LANE
                     if parallel_on:
                         # Parallel: Put in queue and immediately start next download cooldown
@@ -1213,11 +1245,19 @@ async def progress(current, total, message, type, user_id, db, start_time, file_
             pass
         
 # handle private
-async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_only=False, upload_only_file=None):
+async def handle_private(client: Client, acc, message: Message, chatid: int, msgid: int, batch_time=None, file_num=1, download_only=False, upload_only_file=None, user_filter="all"):
     msg: Message = await acc.get_messages(chatid, msgid)
     if msg.empty: return 
     msg_type = get_message_type(msg)
-    if not msg_type: return 
+    if not msg_type: 
+            if user_filter != "all":
+                return "SKIPPED" 
+            return 
+    if user_filter != "all":
+        if user_filter == "audio" and msg_type.lower() in ["audio", "voice"]:
+            pass 
+        elif msg_type.lower() != user_filter:
+            return "SKIPPED"
 
     # Define targets
     user_id = message.from_user.id
