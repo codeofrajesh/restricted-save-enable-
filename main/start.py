@@ -8,7 +8,7 @@ from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated, User
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message 
 from config import API_ID, API_HASH, ERROR_MESSAGE, LOGIN_SYSTEM, STRING_SESSION, CHANNEL_ID, WAITING_TIME
 from database.db import db
-from .strings import HELP_TXT
+from .strings import HELP_TXT, SETTING_HELP_TXT
 from bot import RazzeshUser
 from config import ADMINS
 from PIL import Image
@@ -326,6 +326,14 @@ async def send_help(client: Client, message: Message):
         chat_id=message.chat.id, 
         text=f"{HELP_TXT}"
     )
+
+# setting_help command
+@Client.on_message(filters.command(["settinghelp"]))
+async def send_setting_help(client: Client, message: Message):
+    await client.send_message(
+        chat_id=message.chat.id, 
+        text=f"{SETTING_HELP_TXT}"
+    )    
 	
 #batch command 
 @Client.on_message(filters.command("batch") & filters.private)
