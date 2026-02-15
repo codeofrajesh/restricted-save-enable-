@@ -968,46 +968,57 @@ async def save(client: Client, message: Message):
         # Lock batch status for this user
         batch_temp.IS_BATCH[message.from_user.id] = False
 
-        # Parse the link and extract the single Message ID
+        # --- UNIVERSAL LINK PARSING ENGINE ---
+        # Handles: Private Channels, Private Topics/Threads, Public Channels, and Bot Links
         datas = message.text.split("/")
+        
+        # We use datas[-1] to always grab the Message ID from the end of the URL
+        # We use .replace("?single","") and split("-") to handle album/single post variations
         msgid = int(datas[-1].replace("?single","").split("-")[0])
 
         await db.set_status(message.from_user.id, "processing_single")
 
         try:
-            # --- Logic for Different Link Types ---
-            
-            # 1. Private Channel Link
+            # --- 🛠️ PEER HANDSHAKE (Fix for CHAT_ID_INVALID) ---
+            # We determine the chat identifier first
             if "https://t.me/c/" in message.text:
+                # Private Link Format: /c/CHAT_ID/TOPIC_ID/MSG_ID or /c/CHAT_ID/MSG_ID
                 chatid = int("-100" + datas[4])
+                
+                # Peer Warmup: Necessary for unique sessions to "see" the channel
+                try:
+                    await acc.get_chat(chatid)
+                except:
+                    pass
+                    
                 try:
                     await handle_private(client, acc, message, chatid, msgid)
                 except Exception as e:
-                    if ERROR_MESSAGE == True:
+                    if ERROR_MESSAGE:
                         await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
-        
-            # 2. Bot/Private Chat Link
+
             elif "https://t.me/b/" in message.text:
+                # Bot Private Link Format: /b/username/msg_id
                 username = datas[4]
                 try:
                     await handle_private(client, acc, message, username, msgid)
                 except Exception as e:
-                    if ERROR_MESSAGE == True:
+                    if ERROR_MESSAGE:
                         await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
-                
-            # 3. Public Channel Link
+
             else:
+                # Public Channel Link Format: /username/msg_id
                 username = datas[3]
                 try:
-                    # Try copying directly first for public links
+                    # Try copying directly first for public links (faster, no download)
                     msg = await client.get_messages(username, msgid)
                     await client.copy_message(message.chat.id, msg.chat.id, msg.id, reply_to_message_id=message.id)
                 except Exception:
-                    # If copy fails, fall back to handle_private session
+                    # Fallback to handle_private session if restricted/restricted-copy
                     try:                
                         await handle_private(client, acc, message, username, msgid)               
                     except Exception as e:
-                        if ERROR_MESSAGE == True:
+                        if ERROR_MESSAGE:
                             await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
 
         finally:
@@ -1073,39 +1084,39 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
 # run batch helper function
 async def run_batch(client, bot_acc, message, start_link, count):
     user_id = message.from_user.id
-    base_id = int(start_link.split('/')[-1])
-    chat_id = start_link.split('/')[-2]
-    batch_start_time = time.time()
-    batch_data = await db.get_batch_data(user_id)
-    user_filter = batch_data.get("filter", "all")
     
-    if chat_id.isdigit():
-        chat_id = int("-100" + chat_id)
+    # --- UNIVERSAL BATCH PARSER ---
+    datas = start_link.split('/')
+    
+    # Grab IDs reliably from the end of the URL
+    base_id = int(datas[-1].split('?')[0].split('-')[0])
+    
+    if "https://t.me/c/" in start_link:
+        chat_id = int("-100" + datas[4])
+    else:
+        # For public channels/bots
+        chat_id = datas[3] if "https://t.me/b/" not in start_link else datas[4]
 
-    # --- 🛠️ STEP 1: INITIALIZE PRIVATE SESSION ---
+    # --- DYNAMIC SESSION INITIALIZATION (Multi-User Fix) ---
     if LOGIN_SYSTEM == True:
         user_data = await db.get_session(user_id)
         api_id = int(await db.get_api_id(user_id))
         api_hash = await db.get_api_hash(user_id)
         
-        # Create a unique session name to prevent collision on EC2
-        safe_username = message.from_user.username or "NoUsername"
-        session_name = f"session_{user_id}_{safe_username}"
-        
-        # Create the private client for THIS specific batch
+        session_name = f"session_{user_id}_{message.from_user.username or 'NoUser'}"
         acc = Client(session_name, session_string=user_data, api_hash=api_hash, api_id=api_id)
         await acc.connect()
         
-        # --- 🛠️ STEP 2: PEER HANDSHAKE ---
+        # --- PEER HANDSHAKE (The Fix for 'CHAT_ID_INVALID') ---
         try:
-            # Force the session to "see" the channel and cache its Access Hash
             await acc.get_chat(chat_id) 
-        except Exception as e:
-            print(f"Handshake error: {e}")
+        except Exception:
+            try:
+                await acc.join_chat(chat_id)
+            except: pass 
     else:
-        # Fallback to the global bot/string session if login is off
         acc = bot_acc
-
+        
     index_list = []
     # 1. INITIALIZE RAILWAY TRACKS
     # The Queue acts as the 'buffer' between download and upload lanes
