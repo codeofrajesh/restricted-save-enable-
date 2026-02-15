@@ -784,7 +784,12 @@ async def handle_user_states(client, message):
                     user_data = await db.get_session(user_id)
                     api_id = int(await db.get_api_id(user_id))
                     api_hash = await db.get_api_hash(user_id)
-                    acc = Client("saverestricted", session_string=user_data, api_hash=api_hash, api_id=api_id)
+                    
+                    # Prevent Collision
+                    safe_username = message.from_user.username or "NoUsername"
+                    session_name = f"session_{user_id}_{safe_username}"
+                    
+                    acc = Client(session_name, session_string=user_data, api_hash=api_hash, api_id=api_id)
                     await acc.connect()
                 else:
                     acc = RazzeshUser
@@ -836,7 +841,12 @@ async def handle_user_states(client, message):
                 user_data = await db.get_session(user_id)
                 api_id = int(await db.get_api_id(user_id))
                 api_hash = await db.get_api_hash(user_id)
-                acc = Client("saverestricted", session_string=user_data, api_hash=api_hash, api_id=api_id)
+                
+                # Prevent Collision
+                safe_username = message.from_user.username or "NoUsername"
+                session_name = f"session_{user_id}_{safe_username}"
+                
+                acc = Client(session_name, session_string=user_data, api_hash=api_hash, api_id=api_id)
                 await acc.connect()
             else:
                 acc = RazzeshUser
@@ -933,14 +943,19 @@ async def save(client: Client, message: Message):
 
         # Session Initialization Logic
         if LOGIN_SYSTEM == True:
-            user_data = await db.get_session(message.from_user.id)
+            user_id = message.from_user.id
+            user_data = await db.get_session(user_id)
             if user_data is None:
                 await message.reply("**For Downloading Restricted Content You Have To /login First.**")
                 return
-            api_id = int(await db.get_api_id(message.from_user.id))
-            api_hash = await db.get_api_hash(message.from_user.id)
+            api_id = int(await db.get_api_id(user_id))
+            api_hash = await db.get_api_hash(user_id)
             try:
-                acc = Client("saverestricted", session_string=user_data, api_hash=api_hash, api_id=api_id)
+                # Prevent Collision
+                safe_username = message.from_user.username or "NoUsername"
+                session_name = f"session_{user_id}_{safe_username}"
+                
+                acc = Client(session_name, session_string=user_data, api_hash=api_hash, api_id=api_id)
                 await acc.connect()
             except:
                 return await message.reply("**Your Login Session Expired. So /logout First Then Login Again By - /login**")
