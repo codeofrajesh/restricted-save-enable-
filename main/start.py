@@ -972,6 +972,7 @@ async def save(client: Client, message: Message):
         # Handles: Private Channels, Private Topics/Threads, Public Channels, and Bot Links
         datas = message.text.split("/")
         batch_start_time = time.time()
+        user_filter = "all"
         
         # We use datas[-1] to always grab the Message ID from the end of the URL
         # We use .replace("?single","") and split("-") to handle album/single post variations
@@ -1017,7 +1018,7 @@ async def save(client: Client, message: Message):
                 except Exception:
                     # Fallback to handle_private session if restricted/restricted-copy
                     try:                
-                        await handle_private(client, acc, message, username, msgid)               
+                        await handle_private(client, acc, message, username, msgid, batch_time=batch_start_time, user_filter=user_filter)               
                     except Exception as e:
                         if ERROR_MESSAGE:
                             await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
