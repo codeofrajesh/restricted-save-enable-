@@ -186,15 +186,13 @@ async def set_caption_process(client, callback_query):
     buttons = [
         [InlineKeyboardButton("📝 Single Caption (Apply to All)", callback_data="cap_mode_single")],
         [InlineKeyboardButton("🔢 Batch Caption (Sequence)", callback_data="cap_mode_batch")],
-        [InlineKeyboardButton("🏷️ Rename/Remove Tag", callback_data="cap_mode_tag")],
         [InlineKeyboardButton("🔙 Back", callback_data="settings_home")]
     ]
     await callback_query.message.edit_text(
         "**📝 Custom Caption Setup**\n\n"
         "Choose how you want to caption your files:\n\n"
         "**1. Single Caption:** One caption applied to every file in the batch.\n"
-        "**2. Batch Caption:** A specific list of captions for each file.\n"
-        "**3. Rename/Remove:** Delete or swap specific words/links.",
+        "**2. Batch Caption:** A specific list of captions for each file (e.g., Ep 1, Ep 2...).",
         reply_markup=InlineKeyboardMarkup(buttons)
     ) 
 
@@ -244,42 +242,6 @@ async def set_thumb_process(client, callback_query):
         "• Type `/cancel` to abort.\n\n"
         "**⚠️ Note:** You have 2 attempts to send a valid image."
     )	
-TEMP_REPLACE = {} # Temporary memory for step 1 of replacing
-
-@Client.on_callback_query(filters.regex("cap_mode_tag"))
-async def cap_mode_tag(client, callback_query):
-    buttons = [
-        [InlineKeyboardButton("🗑️ Remove Word/Tag", callback_data="tag_action_remove")],
-        [InlineKeyboardButton("🔄 Replace Word/Tag", callback_data="tag_action_replace")],
-        [InlineKeyboardButton("🔙 Back", callback_data="set_caption_action")]
-    ]
-    await callback_query.message.edit_text(
-        "**🏷️ Rename or Remove Tag**\n\nChoose an action:\n\n"
-        "• **Remove**: Deletes a specific word/link from all captions.\n"
-        "• **Replace**: Swaps an old word/link with a new one.",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-@Client.on_callback_query(filters.regex("tag_action_remove"))
-async def tag_action_remove(client, callback_query):
-    user_id = callback_query.from_user.id
-    await db.set_status(user_id, "awaiting_tag_remove")
-    await callback_query.message.edit_text(
-        "**🗑️ Remove Word/Tag**\n\nSend the exact word, tag, or sentence you want to remove.\n\n"
-        "• Note: It is case-sensitive and spacing matters.\n"
-        "• Type `/off` to disable.\n"
-        "• Type `/cancel` to abort."
-    )
-
-@Client.on_callback_query(filters.regex("tag_action_replace"))
-async def tag_action_replace(client, callback_query):
-    user_id = callback_query.from_user.id
-    await db.set_status(user_id, "awaiting_tag_replace_1")
-    await callback_query.message.edit_text(
-        "**🔄 Replace Word/Tag (Step 1/2)**\n\nFirst, send the **OLD** word, tag, or sentence you want to replace.\n\n"
-        "• Type `/off` to disable.\n"
-        "• Type `/cancel` to abort."
-    )
 
 #customized upload
 @Client.on_callback_query(filters.regex("set_upload_action"))
@@ -935,61 +897,6 @@ async def handle_user_states(client, message):
             else:
                 await message.reply(f"⚠️ **Invalid Format!**\n\nPlease send a **Photo** to set a thumbnail, or type `.delete` to remove the existing one.\n\nAttempts left: {2 - current_try}")
             return
-
-    # --- NEW SECTION: Handle Rename/Remove Tag ---
-    elif status == "awaiting_tag_remove":
-        if message.text.lower() == "/cancel":
-            await db.set_status(user_id, None)
-            return await message.reply("**✅ Action cancelled.**")
-        elif message.text.lower() == "/off":
-            await db.set_custom_caption(user_id, "off")
-            await db.set_caption_mode(user_id, "single")
-            await db.set_status(user_id, None)
-            return await message.reply("**❌ Custom tag removal disabled.**")
-            
-        await db.set_custom_caption(user_id, message.text)
-        await db.set_caption_mode(user_id, "remove") # Sets new mode
-        await db.set_status(user_id, None)
-        await message.reply(f"**✅ Tag Removal Saved!**\n\nI will remove `{message.text}` from all future captions.")
-        message.stop_propagation()
-        return
-
-    elif status == "awaiting_tag_replace_1":
-        if message.text.lower() == "/cancel":
-            await db.set_status(user_id, None)
-            TEMP_REPLACE.pop(user_id, None)
-            return await message.reply("**✅ Action cancelled.**")
-        elif message.text.lower() == "/off":
-            await db.set_custom_caption(user_id, "off")
-            await db.set_caption_mode(user_id, "single")
-            await db.set_status(user_id, None)
-            TEMP_REPLACE.pop(user_id, None)
-            return await message.reply("**❌ Custom tag replacement disabled.**")
-            
-        TEMP_REPLACE[user_id] = message.text # Save step 1 to memory
-        await db.set_status(user_id, "awaiting_tag_replace_2")
-        await message.reply(f"**🔄 Replace Word/Tag (Step 2/2)**\n\nYou are replacing: `{message.text}`\n\nNow, send the **NEW** word/sentence to replace it with.\n\n• Type `/cancel` to abort.")
-        message.stop_propagation()
-        return
-
-    elif status == "awaiting_tag_replace_2":
-        if message.text.lower() == "/cancel":
-            await db.set_status(user_id, None)
-            TEMP_REPLACE.pop(user_id, None)
-            return await message.reply("**✅ Action cancelled.**")
-            
-        old_word = TEMP_REPLACE.get(user_id, "")
-        new_word = message.text
-        
-        # Save both to DB separated by ///
-        await db.set_custom_caption(user_id, f"{old_word}///{new_word}")
-        await db.set_caption_mode(user_id, "replace") # Sets new mode
-        await db.set_status(user_id, None)
-        TEMP_REPLACE.pop(user_id, None)
-        
-        await message.reply(f"**✅ Tag Replacement Saved!**\n\nI will replace `{old_word}` with `{new_word}` in all future captions.")
-        message.stop_propagation()
-        return
         
 #save function 
 @Client.on_message(filters.text & filters.private, group=1)
@@ -1472,20 +1379,6 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                     final_caption = original_caption
             else:
                 final_caption = original_caption
-
-        # MODE 3: REMOVE TAG
-        elif caption_mode == "remove":
-            # Deletes the target word completely
-            final_caption = original_caption.replace(user_custom, "")
-            
-        # MODE 4: REPLACE TAG
-        elif caption_mode == "replace":
-            try:
-                # Splits the saved string (OldWord///NewWord)
-                old_w, new_w = user_custom.split("///", 1)
-                final_caption = original_caption.replace(old_w, new_w)
-            except:
-                final_caption = original_caption        
     
     caption = final_caption
     sent_msg = None
