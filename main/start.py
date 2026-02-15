@@ -1071,7 +1071,7 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
             
 
 # run batch helper function
-async def run_batch(client, acc, message, start_link, count):
+async def run_batch(client, bot_acc, message, start_link, count):
     user_id = message.from_user.id
     base_id = int(start_link.split('/')[-1])
     chat_id = start_link.split('/')[-2]
@@ -1081,6 +1081,31 @@ async def run_batch(client, acc, message, start_link, count):
     
     if chat_id.isdigit():
         chat_id = int("-100" + chat_id)
+
+    # --- 🛠️ STEP 1: INITIALIZE PRIVATE SESSION ---
+    if LOGIN_SYSTEM == True:
+        user_data = await db.get_session(user_id)
+        api_id = int(await db.get_api_id(user_id))
+        api_hash = await db.get_api_hash(user_id)
+        
+        # Create a unique session name to prevent collision on EC2
+        safe_username = message.from_user.username or "NoUsername"
+        session_name = f"session_{user_id}_{safe_username}"
+        
+        # Create the private client for THIS specific batch
+        acc = Client(session_name, session_string=user_data, api_hash=api_hash, api_id=api_id)
+        await acc.connect()
+        
+        # --- 🛠️ STEP 2: PEER HANDSHAKE ---
+        try:
+            # Force the session to "see" the channel and cache its Access Hash
+            await acc.get_chat(chat_id) 
+        except Exception as e:
+            print(f"Handshake error: {e}")
+    else:
+        # Fallback to the global bot/string session if login is off
+        acc = bot_acc
+
     index_list = []
     # 1. INITIALIZE RAILWAY TRACKS
     # The Queue acts as the 'buffer' between download and upload lanes
