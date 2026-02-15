@@ -994,7 +994,7 @@ async def save(client: Client, message: Message):
                     pass
                     
                 try:
-                    await handle_private(client, acc, message, chatid, msgid)
+                    await handle_private(client, acc, message, chatid, msgid, batch_time=batch_start_time, user_filter=user_filter)
                 except Exception as e:
                     if ERROR_MESSAGE:
                         await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
@@ -1003,7 +1003,7 @@ async def save(client: Client, message: Message):
                 # Bot Private Link Format: /b/username/msg_id
                 username = datas[4]
                 try:
-                    await handle_private(client, acc, message, username, msgid)
+                    await handle_private(client, acc, message, username, msgid, batch_time=batch_start_time, user_filter=user_filter)
                 except Exception as e:
                     if ERROR_MESSAGE:
                         await client.send_message(message.chat.id, f"Error: {e}", reply_to_message_id=message.id)
@@ -1087,6 +1087,8 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
 async def run_batch(client, bot_acc, message, start_link, count):
     user_id = message.from_user.id
     batch_start_time = time.time()
+    batch_data = await db.get_batch_data(user_id)
+    user_filter = batch_data.get("filter", "all")
     # --- UNIVERSAL BATCH PARSER ---
     datas = start_link.split('/')
     
