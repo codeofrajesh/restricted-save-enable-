@@ -1325,6 +1325,15 @@ async def handle_private(client: Client, acc, message: Message, chatid: int, msg
                 pass
 
             if download_only:
+                # Create a background task to delete the message after 4 seconds
+                async def delete_smsg_delayed():
+                    await asyncio.sleep(4)
+                    try:
+                        await smsg.delete()
+                    except:
+                        pass
+                
+                asyncio.create_task(delete_smsg_delayed())
                 return file    
         except Exception as e:
             if str(e) == "STOP_TRANSMISSION":
