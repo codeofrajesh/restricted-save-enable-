@@ -971,6 +971,7 @@ async def save(client: Client, message: Message):
         # --- UNIVERSAL LINK PARSING ENGINE ---
         # Handles: Private Channels, Private Topics/Threads, Public Channels, and Bot Links
         datas = message.text.split("/")
+        batch_start_time = time.time()
         
         # We use datas[-1] to always grab the Message ID from the end of the URL
         # We use .replace("?single","") and split("-") to handle album/single post variations
@@ -1084,7 +1085,7 @@ async def upload_worker(client, acc, message, upload_queue, stats_msg, total_cou
 # run batch helper function
 async def run_batch(client, bot_acc, message, start_link, count):
     user_id = message.from_user.id
-    
+    batch_start_time = time.time()
     # --- UNIVERSAL BATCH PARSER ---
     datas = start_link.split('/')
     
@@ -1116,7 +1117,7 @@ async def run_batch(client, bot_acc, message, start_link, count):
             except: pass 
     else:
         acc = bot_acc
-        
+
     index_list = []
     # 1. INITIALIZE RAILWAY TRACKS
     # The Queue acts as the 'buffer' between download and upload lanes
